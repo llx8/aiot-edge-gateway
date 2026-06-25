@@ -6,6 +6,7 @@ add_library(common STATIC
     Logger.cpp
     Protocol.cpp
     InternalMessage.cpp
+    Config.cpp
 )
 
 target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

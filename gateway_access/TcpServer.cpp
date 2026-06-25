@@ -12,23 +12,20 @@
 #include <stdexcept>
 
 // 构造函数
-TcpServer::TcpServer(uint16_t port, const std::string& uds_path)
+TcpServer::TcpServer(uint16_t port)
     : listen_fd_(-1)
     , epfd_(-1)
-    , uds_fd_(-1)
     , running_(false){
         epfd_ = epoll_create1(0);
         if (epfd_ < 0){
             throw std::runtime_error("epoll_create failed");
         }
         setup_listen_socket(port);
-        setup_uds(uds_path);
     }
 
 // 析构函数
 TcpServer::~TcpServer(){
     sessions_.clear();
-    if (uds_fd_ >= 0) close(uds_fd_);
     if (listen_fd_ >= 0) close(listen_fd_);
     if (epfd_ >= 0) close(epfd_);
 }
@@ -75,26 +72,6 @@ void TcpServer::setup_listen_socket(uint16_t port){
     GetLogger("gateway")->info("Listening on port {}", port);
 }
 
-// uds连接进程B
-void TcpServer::setup_uds(const std::string& uds_path){ 
-    uds_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (uds_fd_ < 0){
-        throw std::runtime_error("socket failed");
-    }
-
-    struct sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, uds_path.c_str(), sizeof(addr.sun_path) - 1);
-    if (connect(uds_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0){
-        GetLogger("gateway")->error("connect failed");
-        close(uds_fd_);
-        uds_fd_ = -1;
-    }
-    else{
-        GetLogger("gateway")->info("UDS connected to {}", uds_path);
-    }
-}
-
 // 处理新连接
 void TcpServer::handle_new_connection(){ 
     while(true){
@@ -114,6 +91,7 @@ void TcpServer::handle_new_connection(){
         ev.data.fd = client_fd;
         epoll_ctl(epfd_, EPOLL_CTL_ADD, client_fd, &ev);
 
+        // 为每个新连接创建独立 Session，按 fd 索引，连接断开时自动回收
         sessions_[client_fd] = std::make_unique<Session>(client_fd);
 
         char ip[INET_ADDRSTRLEN];
@@ -132,18 +110,25 @@ void TcpServer::handle_client_data(int fd){
     uint8_t buf[4096];
     bool alive = true;
 
+    // 防止while无线循环，设置读取最大内存
+    static constexpr size_t kMaxReadSize = 65536;
+    size_t total_read = 0;
     while(true){
         ssize_t n = recv(fd, buf, sizeof(buf), 0);
         if (n > 0){
+            total_read += n;
             auto packets = session->handle_data(buf, static_cast<size_t>(n));
 
             for (const auto& pkt : packets){
-                if (uds_fd_ >= 0){
-                    ssize_t sent = write(uds_fd_, pkt.data(), pkt.size());
-                    if (sent < 0){
-                        GetLogger("gateway")->error("UDS write : {}", strerror(errno));
-                    }
+                if(callback_) {
+                    Tlvpacket decoded;
+                    if(decode_tlv(pkt.data(), pkt.size(), decoded))
+                    // 调用回调函数执行具体操作
+                    callback_(decoded.value);
                 }
+            }
+            if (total_read >= kMaxReadSize){
+                break;
             }
         }
         else if (n == 0){
@@ -170,10 +155,10 @@ void TcpServer::close_connection(int fd){
 }
 
 // 主循环
-void TcpServer::run(){ 
+bool TcpServer::start(){ 
     running_ = true;
     auto logger = GetLogger("gateway");
-        
+    
     struct epoll_event events[kMaxEvents];
     while(running_){ 
         int n = epoll_wait(epfd_, events, kMaxEvents, 1000);
@@ -193,14 +178,24 @@ void TcpServer::run(){
                 close_connection(fd);
             }
             else if (ev & EPOLLIN){
+                // 位掩码检查 fd 是否可读，数据到达则进入业务处理
                 handle_client_data(fd);
             }
         }
     }
     logger->info("gateway stopped");
+    return true;
 }
 
 // 停止
 void TcpServer::stop(){
     running_ = false;
+}
+
+std::string TcpServer::name() const{
+    return "TCP-Sensor";
+}
+
+void TcpServer::set_data_callback(DataCallback cb){
+    callback_ = std::move(cb);
 }

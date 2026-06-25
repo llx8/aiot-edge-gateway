@@ -6,19 +6,22 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#include "ISouthbound.h"
 
-class TcpServer {
+class TcpServer : public ISouthbound {
 public:
-    TcpServer(uint16_t port, const std::string& uds_path);
+    TcpServer(uint16_t port);
     ~TcpServer();
 
-    void run();
-    void stop();
+    bool start() override;
+    void stop() override;
+    std::string name() const override;
+    void set_data_callback(DataCallback cb) override;
 
 private:
     int listen_fd_;
     int epfd_;
-    int uds_fd_;
+    DataCallback callback_;
     bool running_;
 
     std::unordered_map<int, std::unique_ptr<Session>> sessions_;
@@ -27,7 +30,6 @@ private:
     static constexpr int kListenBacklog = 128;
 
     void setup_listen_socket(uint16_t port);
-    void setup_uds(const std::string& path);
     void handle_new_connection();
     void handle_client_data(int fd);
     void close_connection(int fd);
