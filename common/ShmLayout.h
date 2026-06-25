@@ -7,7 +7,7 @@
 
 #pragma pack(push, 1)
 struct ShmBlock{
-    uint64_t magic;         // 0x47574D4D
+    uint32_t magic;         // 0x47574D4D
     uint64_t version;       // 版本
     int64_t uptime_sec;     // 运行时间
     int32_t total_packets;  // 总包数

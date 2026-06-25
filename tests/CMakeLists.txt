@@ -28,4 +28,8 @@ add_test(NAME TlvProtocolTest COMMAND test_TlvProtocol)
 add_test(NAME RingBufferTest  COMMAND test_RingBuffer)
 add_test(NAME ShmLayoutTest   COMMAND test_ShmLayout)
 add_test(NAME ProtocolTest    COMMAND test_Protocol)
+add_executable(test_InternalMessage test_InternalMessage.cpp)
+target_link_libraries(test_InternalMessage common GTest::gtest_main)
+
+add_test(NAME InternalMessageTest COMMAND test_InternalMessage)
 add_test(NAME SessionTest     COMMAND test_Session)
