@@ -1,9 +1,0 @@
-build/
-Testing/
-.claude/
-docs/
-CLAUDE.md
-MEMORY.md
-*.swp
-*.o
-*.out
