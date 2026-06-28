@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(common)
 add_subdirectory(gateway_access)
+add_subdirectory(gateway_core)
 add_subdirectory(tools)
 enable_testing()
 add_subdirectory(tests)
