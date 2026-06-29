@@ -93,10 +93,10 @@ TEST_F(EventLoopTest, ReceivesData_NoCrash) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     InternalMessage msg{};
-    msg.header.src_type = SourceType::TCP_SENSOR;
-    msg.header.timestamp_ms = 1234567890123;
+    msg.source_type = 0;
+    msg.node_id     = 1;
+    msg.tlv_type    = 0x01;
     msg.payload = {0x01, 0x02, 0x03};
-    msg.header.payload_len = msg.payload.size();
 
     bool ok = send_msg(kTestSock, msg);
     EXPECT_TRUE(ok);

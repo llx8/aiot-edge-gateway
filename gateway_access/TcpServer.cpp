@@ -120,11 +120,19 @@ void TcpServer::handle_client_data(int fd){
             auto packets = session->handle_data(buf, static_cast<size_t>(n));
 
             for (const auto& pkt : packets){
-                if(callback_) {
+                if(m_on_data) {
                     Tlvpacket decoded;
-                    if(decode_tlv(pkt.data(), pkt.size(), decoded))
-                    // 调用回调函数执行具体操作
-                    callback_(decoded.value);
+                    if(decode_tlv(pkt.data(), pkt.size(), decoded)){
+                        InternalMessage msg;
+                        msg.source_type = 0; // TCP
+                        msg.node_id = 0;     // 默认节点ID为0
+                        msg.tlv_type = decoded.header.type;
+                        msg.payload = decoded.value;
+
+                        m_on_data(msg);
+                    } else {
+                        GetLogger("gateway")->warn("Failed to decode TLV packet from fd {}", fd);
+                    }
                 }
             }
             if (total_read >= kMaxReadSize){
@@ -155,7 +163,7 @@ void TcpServer::close_connection(int fd){
 }
 
 // 主循环
-bool TcpServer::start(){ 
+void TcpServer::start(){ 
     running_ = true;
     auto logger = GetLogger("gateway");
     
@@ -184,7 +192,6 @@ bool TcpServer::start(){
         }
     }
     logger->info("gateway stopped");
-    return true;
 }
 
 // 停止
@@ -192,10 +199,6 @@ void TcpServer::stop(){
     running_ = false;
 }
 
-std::string TcpServer::name() const{
+std::string_view TcpServer::name() const{
     return "TCP-Sensor";
-}
-
-void TcpServer::set_data_callback(DataCallback cb){
-    callback_ = std::move(cb);
 }

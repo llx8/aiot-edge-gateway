@@ -55,7 +55,7 @@ TEST_F(SqliteStoreTest, Constructor_CreatesTables) {
 TEST_F(SqliteStoreTest, InsertSensor_ReturnsTrue) {
     SqliteStore store(kTestDb);
 
-    bool ok = store.insert_sensor(1000000, SourceType::TCP_SENSOR, "temp:25.5,humidity:60.2");
+    bool ok = store.insert_sensor(0, 1, 0x01, "temp:25.5,humidity:60.2");
     EXPECT_TRUE(ok);
 }
 
@@ -63,8 +63,8 @@ TEST_F(SqliteStoreTest, InsertSensor_ReturnsTrue) {
 TEST_F(SqliteStoreTest, InsertSensor_DataPersisted) {
     SqliteStore store(kTestDb);
 
-    store.insert_sensor(1000000, SourceType::TCP_SENSOR, "temp:25.5");
-    store.insert_sensor(2000000, static_cast<SourceType>(0xFF), "heartbeat");
+    store.insert_sensor(0, 1, 0x01, "temp:25.5");
+    store.insert_sensor(0, 2, 0xFF, "heartbeat");
 
     sqlite3* db = nullptr;
     sqlite3_open(kTestDb, &db);
@@ -73,12 +73,13 @@ TEST_F(SqliteStoreTest, InsertSensor_DataPersisted) {
     {
         sqlite3_stmt* stmt = nullptr;
         sqlite3_prepare_v2(db,
-            "SELECT ts, sensor_type, value FROM sensor_data WHERE ts = 1000000;",
+            "SELECT source_type, node_id, tlv_type, value FROM sensor_data WHERE node_id = 1;",
             -1, &stmt, nullptr);
         ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-        EXPECT_EQ(sqlite3_column_int64(stmt, 0), 1000000);
-        EXPECT_EQ(sqlite3_column_int(stmt, 1), static_cast<int>(SourceType::TCP_SENSOR));
-        EXPECT_EQ(std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))), "temp:25.5");
+        EXPECT_EQ(sqlite3_column_int(stmt, 0), 0);
+        EXPECT_EQ(sqlite3_column_int(stmt, 1), 1);
+        EXPECT_EQ(sqlite3_column_int(stmt, 2), 0x01);
+        EXPECT_EQ(std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))), "temp:25.5");
         sqlite3_finalize(stmt);
     }
 
@@ -86,12 +87,13 @@ TEST_F(SqliteStoreTest, InsertSensor_DataPersisted) {
     {
         sqlite3_stmt* stmt = nullptr;
         sqlite3_prepare_v2(db,
-            "SELECT ts, sensor_type, value FROM sensor_data WHERE ts = 2000000;",
+            "SELECT source_type, node_id, tlv_type, value FROM sensor_data WHERE node_id = 2;",
             -1, &stmt, nullptr);
         ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-        EXPECT_EQ(sqlite3_column_int64(stmt, 0), 2000000);
-        EXPECT_EQ(sqlite3_column_int(stmt, 1), 0xFF);
-        EXPECT_EQ(std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))), "heartbeat");
+        EXPECT_EQ(sqlite3_column_int(stmt, 0), 0);
+        EXPECT_EQ(sqlite3_column_int(stmt, 1), 2);
+        EXPECT_EQ(sqlite3_column_int(stmt, 2), 0xFF);
+        EXPECT_EQ(std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))), "heartbeat");
         sqlite3_finalize(stmt);
     }
 
@@ -102,19 +104,20 @@ TEST_F(SqliteStoreTest, InsertSensor_DataPersisted) {
 TEST_F(SqliteStoreTest, InsertAlarm_DataPersisted) {
     SqliteStore store(kTestDb);
 
-    store.insert_alarm(3000000, static_cast<SourceType>(0x04), "温度超过80度: 85.3");
+    store.insert_alarm(0, 1, 0x04, "温度超过80度: 85.3");
 
     sqlite3* db = nullptr;
     sqlite3_open(kTestDb, &db);
 
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db,
-        "SELECT ts, alarm_type, detail FROM alarm_log WHERE ts = 3000000;",
+        "SELECT source_type, node_id, tlv_type, detail FROM alarm_log WHERE node_id = 1;",
         -1, &stmt, nullptr);
     ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-    EXPECT_EQ(sqlite3_column_int64(stmt, 0), 3000000);
-    EXPECT_EQ(sqlite3_column_int(stmt, 1), 0x04);
-    EXPECT_EQ(std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))),
+    EXPECT_EQ(sqlite3_column_int(stmt, 0), 0);
+    EXPECT_EQ(sqlite3_column_int(stmt, 1), 1);
+    EXPECT_EQ(sqlite3_column_int(stmt, 2), 0x04);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))),
               "温度超过80度: 85.3");
     sqlite3_finalize(stmt);
 
@@ -125,11 +128,11 @@ TEST_F(SqliteStoreTest, InsertAlarm_DataPersisted) {
 TEST_F(SqliteStoreTest, ReopenSameDatabase_DoesNotCrash) {
     {
         SqliteStore store1(kTestDb);
-        store1.insert_sensor(1, SourceType::TCP_SENSOR, "data1");
+        store1.insert_sensor(0, 1, 0x01, "data1");
     }
     {
         SqliteStore store2(kTestDb);
-        store2.insert_sensor(2, static_cast<SourceType>(0x02), "data2");
+        store2.insert_sensor(0, 2, 0x02, "data2");
     }
 
     sqlite3* db = nullptr;

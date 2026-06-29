@@ -22,8 +22,8 @@ int main(){
     signal(SIGTERM, signal_handler);
 
     auto config = load_config("conf/gateway.conf");
-    std::string uds_path = config["uds_path"];
-    std::string db_path = config["db_path"];
+    std::string uds_path = config["uds"]["data_path"];
+    std::string db_path = config["sqlite"]["db_path"];
 
     EventLoop event_loop(uds_path);
     g_event_loop = &event_loop;
@@ -38,7 +38,7 @@ int main(){
         total_packets++;
         version++;
 
-        sqlite_store.insert_sensor(msg.header.timestamp_ms, msg.header.src_type, std::string(msg.payload.begin(), msg.payload.end()));
+        sqlite_store.insert_sensor(msg.source_type, msg.node_id, msg.tlv_type, std::string(msg.payload.begin(), msg.payload.end()));
 
         ShmBlock block{};
         block.magic = SHM_MAGIC;
@@ -46,8 +46,8 @@ int main(){
         block.total_packets = total_packets;
         shm_publisher.publish(block);
 
-        logger->info("收到消息: timestamp={}, src_type={}, payload_len={}", 
-            msg.header.timestamp_ms, static_cast<int>(msg.header.src_type), msg.header.payload_len);
+        logger->info("收到消息: source_type={}, node_id={}, tlv_type={}, payload_len={}", 
+            msg.source_type, msg.node_id, msg.tlv_type, msg.payload.size());
     });
 
     event_loop.start();

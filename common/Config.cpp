@@ -15,8 +15,8 @@ static std::string trim(const std::string& str) {
     return str.substr(start, end - start);
 }
 
-std::unordered_map<std::string, std::string> load_config(const std::string& filepath) {
-    std::unordered_map<std::string, std::string> config;
+ConfigMap load_config(const std::string& filepath) {
+    ConfigMap config;
 
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -24,11 +24,18 @@ std::unordered_map<std::string, std::string> load_config(const std::string& file
     }
 
     std::string line;
+    std::string current_section;
     while (std::getline(file, line)) {
         line = trim(line);
 
         // 跳过空行和注释行
         if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        // 检查是否是节标题
+        if (line[0] == '[' && line[line.size() - 1] == ']') {
+            current_section = trim(line.substr(1, line.size() - 2));
             continue;
         }
 
@@ -42,7 +49,7 @@ std::unordered_map<std::string, std::string> load_config(const std::string& file
         std::string value = trim(line.substr(pos + 1));
 
         if (!key.empty() && !value.empty()) {
-            config[key] = value;
+            config[current_section][key] = value;
         }
     }
 

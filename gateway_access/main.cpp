@@ -8,7 +8,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <vector>
-#include <chrono>
 #include "Config.h"
 
 // 全局指针，供信号处理函数访问 TcpServer 实例
@@ -68,8 +67,8 @@ int main(){
 
     // 读配置文件，找不到用默认值
     auto config = load_config("conf/gateway.conf");
-    uint16_t port = config.count("port") ? static_cast<uint16_t>(std::stoi(config["port"])) : 9000;
-    std::string uds_path = config.count("uds_path") ? config["uds_path"] : "/tmp/gateway_data.sock";
+    uint16_t port = static_cast<uint16_t>(std::stoi(config["tcp"]["port"]));
+    std::string uds_path = config["uds"]["data_path"];
 
     logger->info("Config: port={}, uds_path={}", port, uds_path);
 
@@ -79,14 +78,7 @@ int main(){
     g_server = &server;
 
     // 给回调函数添加执行函数
-    server.set_data_callback([uds_fd](const std::vector<uint8_t>& payload){
-        InternalMessage msg;
-        msg.header.src_type = SourceType::TCP_SENSOR;
-        // 设置时间戳
-        msg.header.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        msg.payload  = payload;
-        msg.header.payload_len = payload.size();
-
+    server.set_data_callback([uds_fd](const InternalMessage& msg){
         auto encoded = encode_internal_msg(msg);
         if (uds_fd >= 0){
             write(uds_fd, encoded.data(), encoded.size());

@@ -11,10 +11,10 @@ public:
     ~SqliteStore();
 
     // 插入传感器数据
-    bool insert_sensor(int64_t ts, SourceType sensor_type, const std::string& value);
+    bool insert_sensor(int32_t source_type, int32_t node_id, uint8_t tlv_type, const std::string& value);
 
     // 插入告警
-    bool insert_alarm(int64_t ts, SourceType alarm_type, const std::string& detail);
+    bool insert_alarm(int32_t source_type, int32_t node_id, uint8_t tlv_type, const std::string& detail);
 
 private:
     sqlite3* db_;

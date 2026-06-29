@@ -13,15 +13,13 @@ public:
     TcpServer(uint16_t port);
     ~TcpServer();
 
-    bool start() override;
+    void start() override;
     void stop() override;
-    std::string name() const override;
-    void set_data_callback(DataCallback cb) override;
+    std::string_view name() const override;
 
 private:
     int listen_fd_;
     int epfd_;
-    DataCallback callback_;
     bool running_;
 
     std::unordered_map<int, std::unique_ptr<Session>> sessions_;

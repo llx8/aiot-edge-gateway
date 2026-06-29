@@ -25,16 +25,18 @@ void SqliteStore::create_table() {
     const char* sql_sensor = R"(
         CREATE TABLE IF NOT EXISTS sensor_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER NOT NULL,
-            sensor_type INTEGER NOT NULL,
+            source_type INTEGER NOT NULL,
+            node_id INTEGER NOT NULL,
+            tlv_type INTEGER NOT NULL,
             value TEXT NOT NULL
         );
     )";
     const char* sql_alarm = R"(
         CREATE TABLE IF NOT EXISTS alarm_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER NOT NULL,
-            alarm_type INTEGER NOT NULL,
+            source_type INTEGER NOT NULL,
+            node_id INTEGER NOT NULL,
+            tlv_type INTEGER NOT NULL,
             detail TEXT NOT NULL
         );
     )";
@@ -44,14 +46,15 @@ void SqliteStore::create_table() {
 }
 
 // 插入传感器数据
-bool SqliteStore::insert_sensor(int64_t ts, SourceType sensor_type, const std::string& value){
-    const char* sql = "INSERT INTO sensor_data (ts, sensor_type, value) VALUES (?, ?, ?);";
+bool SqliteStore::insert_sensor(int32_t source_type, int32_t node_id, uint8_t tlv_type, const std::string& value){
+    const char* sql = "INSERT INTO sensor_data (source_type, node_id, tlv_type, value) VALUES (?, ?, ?, ?);";
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
 
-    sqlite3_bind_int64(stmt, 1, ts);
-    sqlite3_bind_int(stmt, 2, static_cast<int>(sensor_type));
-    sqlite3_bind_text(stmt, 3, value.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 1, static_cast<int>(source_type));
+    sqlite3_bind_int(stmt, 2, static_cast<int>(node_id));
+    sqlite3_bind_int(stmt, 3, static_cast<int>(tlv_type));
+    sqlite3_bind_text(stmt, 4, value.c_str(), -1, SQLITE_TRANSIENT);
 
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -59,14 +62,15 @@ bool SqliteStore::insert_sensor(int64_t ts, SourceType sensor_type, const std::s
 }
 
 // 插入告警
-bool SqliteStore::insert_alarm(int64_t ts, SourceType alarm_type, const std::string& detail){
-    const char* sql = "INSERT INTO alarm_log (ts, alarm_type, detail) VALUES (?, ?, ?);";
+bool SqliteStore::insert_alarm(int32_t source_type, int32_t node_id, uint8_t tlv_type, const std::string& detail){
+    const char* sql = "INSERT INTO alarm_log (source_type, node_id, tlv_type, detail) VALUES (?, ?, ?, ?);";
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
 
-    sqlite3_bind_int64(stmt, 1, ts);
-    sqlite3_bind_int(stmt, 2, static_cast<int>(alarm_type));
-    sqlite3_bind_text(stmt, 3, detail.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 1, static_cast<int>(source_type));
+    sqlite3_bind_int(stmt, 2, static_cast<int>(node_id));
+    sqlite3_bind_int(stmt, 3, static_cast<int>(tlv_type));
+    sqlite3_bind_text(stmt, 4, detail.c_str(), -1, SQLITE_TRANSIENT);
 
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
