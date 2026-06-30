@@ -1,5 +1,6 @@
 #include "Protocol.h"
 #include <cstring>
+#include "TlvProtocol.h"
 
 // 编码请求
 std::vector<uint8_t> encode_query_request(const QueryRequest& req){

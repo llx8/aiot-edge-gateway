@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "Protocol.h"
 #include <cstring>
+#include "TlvProtocol.h"
 
 // ========== 请求编解码往返 ==========
 
