@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <vector>
 #include <cstddef>
-#include "TlvProtocol.h"
 
 // 查询类型
 enum class QueryType : uint8_t {

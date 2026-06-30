@@ -1,6 +1,5 @@
 #include "Config.h"
 #include <fstream>
-#include <algorithm>
 
 // 去掉首尾空格
 static std::string trim(const std::string& str) {
