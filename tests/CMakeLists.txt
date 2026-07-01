@@ -49,3 +49,8 @@ target_link_libraries(test_ShmPublisher gateway_core_lib GTest::gtest_main)
 add_test(NAME SqliteStoreTest COMMAND test_SqliteStore)
 add_test(NAME EventLoopTest  COMMAND test_EventLoop)
 add_test(NAME ShmPublisherTest COMMAND test_ShmPublisher)
+
+add_executable(test_ShmReader test_ShmReader.cpp)
+target_link_libraries(test_ShmReader gateway_monitor_lib gateway_core_lib GTest::gtest_main)
+
+add_test(NAME ShmReaderTest COMMAND test_ShmReader)

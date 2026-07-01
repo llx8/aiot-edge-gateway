@@ -3,7 +3,6 @@
 #include <sqlite3.h>
 #include <string>
 #include <cstdint>
-#include "InternalMessage.h"
 
 class SqliteStore {
 public:
