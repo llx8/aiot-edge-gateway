@@ -23,7 +23,6 @@ TEST_F(ShmReaderTest, Read_GetsPublisherData) {
 
     ShmBlock block{};
     block.magic = SHM_MAGIC;
-    block.version = 10;
     block.total_packets = 200;
     block.total_alarms = 5;
     block.cpu_usage = 0.65f;
@@ -38,7 +37,8 @@ TEST_F(ShmReaderTest, Read_GetsPublisherData) {
     ShmBlock out{};
     ASSERT_TRUE(reader.read(out));
 
-    EXPECT_EQ(out.version, 10ul);
+    EXPECT_EQ(out.magic, SHM_MAGIC);
+    EXPECT_EQ(out.version % 2, 0u);  // version 应该是偶数（可读）
     EXPECT_EQ(out.total_packets, 200);
     EXPECT_EQ(out.total_alarms, 5);
     EXPECT_FLOAT_EQ(out.cpu_usage, 0.65f);
@@ -54,7 +54,6 @@ TEST_F(ShmReaderTest, HasNewData_DetectsVersionChange) {
 
     ShmBlock block1{};
     block1.magic = SHM_MAGIC;
-    block1.version = 1;
     pub.publish(block1);
 
     ShmReader reader(kTestKey);
@@ -63,9 +62,11 @@ TEST_F(ShmReaderTest, HasNewData_DetectsVersionChange) {
 
     EXPECT_FALSE(reader.has_new_data());
 
+    // 再发布两次，让两个缓冲区的 version 都大于 last_version_
     ShmBlock block2{};
     block2.magic = SHM_MAGIC;
-    block2.version = 2;
+    block2.total_packets = 42;
+    pub.publish(block2);
     pub.publish(block2);
 
     EXPECT_TRUE(reader.has_new_data());
@@ -87,13 +88,15 @@ TEST_F(ShmReaderTest, Read_ReturnsFalse_WhenMagicMismatch) {
 
     ShmBlock out{};
 
-    int shmid = shmget(kTestKey, sizeof(ShmBlock), 0666);
+    int shmid = shmget(kTestKey, sizeof(ShmRegion), 0666);
     ASSERT_GE(shmid, 0);
-    ShmBlock* raw = static_cast<ShmBlock*>(shmat(shmid, nullptr, 0));
-    ASSERT_NE(raw, reinterpret_cast<void*>(-1));
+    ShmRegion* region = static_cast<ShmRegion*>(shmat(shmid, nullptr, 0));
+    ASSERT_NE(region, reinterpret_cast<void*>(-1));
 
-    raw->magic = 0xDEADBEEF;
-    shmdt(raw);
+    // 破坏两个缓冲区的 magic
+    region->buffers[0].magic = 0xDEADBEEF;
+    region->buffers[1].magic = 0xDEADBEEF;
+    shmdt(region);
 
     ShmReader reader(kTestKey);
     EXPECT_FALSE(reader.read(out));
@@ -106,7 +109,6 @@ TEST_F(ShmReaderTest, Read_ReturnsCopyNotReference) {
 
     ShmBlock block{};
     block.magic = SHM_MAGIC;
-    block.version = 1;
     block.total_packets = 50;
     pub.publish(block);
 
@@ -114,11 +116,20 @@ TEST_F(ShmReaderTest, Read_ReturnsCopyNotReference) {
     ShmBlock out{};
     ASSERT_TRUE(reader.read(out));
 
+    // 修改读到的数据
     out.total_packets = 999;
     out.version = 999;
 
+    // 再次发布新数据（发布两次，确保有新数据）
+    ShmBlock block2{};
+    block2.magic = SHM_MAGIC;
+    block2.total_packets = 50;
+    pub.publish(block2);
+    pub.publish(block2);
+
+    // 再次读取，应该还是原始数据
     ShmBlock out2{};
     ASSERT_TRUE(reader.read(out2));
     EXPECT_EQ(out2.total_packets, 50);
-    EXPECT_EQ(out2.version, 1ul);
+    EXPECT_EQ(out2.version % 2, 0u);  // 偶数（可读）
 }

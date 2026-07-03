@@ -15,5 +15,5 @@ public:
     void publish(const ShmBlock& block);
 private:
     int shmid_;
-    ShmBlock* ptr_;
+    ShmRegion* ptr_;
 };

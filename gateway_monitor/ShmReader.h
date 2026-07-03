@@ -15,6 +15,6 @@ public:
     bool has_new_data();
 private:
     int shmid_;
-    ShmBlock* ptr_;
+    ShmRegion* ptr_;
     uint64_t last_version_; // 上次读到的版本号
 };
