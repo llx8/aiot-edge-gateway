@@ -22,7 +22,7 @@ protected:
 
 // 辅助: 连接 UDS 并发送一条 InternalMessage
 static bool send_msg(const char* path, const InternalMessage& msg) {
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (fd < 0) return false;
 
     struct sockaddr_un addr{};
@@ -67,7 +67,7 @@ TEST_F(EventLoopTest, AcceptsClientConnection) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     ASSERT_GE(fd, 0);
 
     struct sockaddr_un addr{};

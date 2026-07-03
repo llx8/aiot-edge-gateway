@@ -39,7 +39,7 @@ EventLoop::~EventLoop() {
 // 绑定监听，返回listen_fd
 int EventLoop::setup() {
     // 创建UNIX域套接字
-    listen_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
+    listen_fd_ = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (listen_fd_ < 0) {
         throw std::runtime_error("socket failed");
     }

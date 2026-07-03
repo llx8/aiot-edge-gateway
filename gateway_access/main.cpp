@@ -27,7 +27,7 @@ static int connect_uds(const std::string& path, int max_retries = 30){
 
     // 重试次数，最多30次 总等待时间位51秒
     for(int retry = 0; retry < max_retries; retry++) {
-        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
         if (fd < 0) {
             GetLogger("gateway")->error("UDS socket failed: {}", strerror(errno));
             return -1;

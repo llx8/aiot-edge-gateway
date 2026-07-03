@@ -8,7 +8,7 @@ TEST(ShmLayoutTest, StructSize) {
     // + cpu_usage(4) + mem_usage(4) + online_nodes(4) + mqtt_connected(4)
     // + alarm_active(4) + last_alarm(128)
     // = 8+8+8+4+4+4+4+4+4+4+128 = 180
-    EXPECT_EQ(sizeof(ShmBlock), 176u);
+    EXPECT_EQ(sizeof(ShmBlock), 248u);
 
     // 在共享内存 IPC 中，这个值跨进程必须一致，写死在这里防止意外变化
 }

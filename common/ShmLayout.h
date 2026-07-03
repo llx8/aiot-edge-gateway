@@ -5,7 +5,6 @@
 
 #define SHM_MAGIC  0x47574D4D
 
-#pragma pack(push, 1)
 struct ShmBlock{
     uint32_t magic;         // 0x47574D4D
     uint64_t version;       // 版本
@@ -18,8 +17,9 @@ struct ShmBlock{
     int32_t mqtt_connected; // mqtt连接数
     int32_t alarm_active;   // 激活的告警数
     char last_alarm[128];   // 最后一个告警
+    // M2预留：Ping-Pong双缓冲扩展区
+    uint8_t reserved[64];
 };
-#pragma pack(pop)
 
 #endif
 
