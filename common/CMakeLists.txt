@@ -7,6 +7,7 @@ add_library(common STATIC
     Protocol.cpp
     InternalMessage.cpp
     Config.cpp
+    ModbusRtu.cpp
 )
 
 target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

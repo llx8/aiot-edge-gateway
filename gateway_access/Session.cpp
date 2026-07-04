@@ -42,9 +42,9 @@ std::vector<std::vector<uint8_t>> Session::handle_data(const uint8_t* data, size
                 }
                 else{
                     current_header_.version = ring_buffer_.read_ptr()[0]; 
-                    // 需要将网络字节序转成主机字节序
+                    
                     uint16_t total_len_net = (ring_buffer_.read_ptr()[1] << 8) | ring_buffer_.read_ptr()[2];
-                    current_header_.total_len = ntohs(total_len_net);
+                    current_header_.total_len = (ring_buffer_.read_ptr()[1] << 8) | ring_buffer_.read_ptr()[2];
                     current_header_.type = ring_buffer_.read_ptr()[3];
                     ring_buffer_.consume(sizeof(TlvHeader) - sizeof(uint16_t));
                     if (current_header_.total_len >= sizeof(TlvHeader) + sizeof(uint16_t) && current_header_.total_len <= kMaxPacketSize){
@@ -69,9 +69,8 @@ std::vector<std::vector<uint8_t>> Session::handle_data(const uint8_t* data, size
                     full[0] = 0x5A;
                     full[1] = 0x5A;
                     full[2] = current_header_.version;
-                    uint16_t total_len_net = htons(current_header_.total_len);
-                    full[3] = (total_len_net >> 8) & 0xFF;
-                    full[4] = total_len_net & 0xFF;
+                    full[3] = (current_header_.total_len >> 8) & 0xFF;
+                    full[4] = current_header_.total_len & 0xFF;
                     full[5] = current_header_.type;
                     memcpy(&full[6], ring_buffer_.read_ptr(), current_header_.total_len - sizeof(TlvHeader));
                     Tlvpacket packet;

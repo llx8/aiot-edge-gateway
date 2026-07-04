@@ -24,15 +24,15 @@ std::vector<uint8_t> encode_tlv(const Tlvpacket& packet){
     std::vector<uint8_t> buffer;
 
     // 写入Header 2 1 2 1字节
-    uint16_t magic_net = htons(packet.header.magic);
-    buffer.push_back((magic_net >> 8) & 0xFF);      // 高字节
-    buffer.push_back(magic_net & 0xFF);             // 低字节
+    uint16_t magic = packet.header.magic;
+    buffer.push_back((magic >> 8) & 0xFF);      // 高字节
+    buffer.push_back(magic & 0xFF);             // 低字节
 
     buffer.push_back(packet.header.version);
 
-    uint16_t total_len_net = htons(packet.header.total_len);
-    buffer.push_back((total_len_net >> 8) & 0xFF);
-    buffer.push_back(total_len_net & 0xFF);
+    uint16_t total_len = packet.header.total_len;
+    buffer.push_back((total_len >> 8) & 0xFF);
+    buffer.push_back(total_len & 0xFF);
 
     buffer.push_back(packet.header.type);
 
@@ -56,15 +56,15 @@ bool decode_tlv(const uint8_t* data, size_t length, Tlvpacket& packet){
         return false;
     }
     // 读取Header
-    uint16_t magic_net = (data[0] << 8) | data[1];
-    packet.header.magic = ntohs(magic_net);
+    uint16_t magic = (data[0] << 8) | data[1];
+    packet.header.magic = magic;
 
     // version
     packet.header.version = data[2];
 
     // total_len
-    uint16_t total_len_net = (data[3] << 8) | data[4];
-    packet.header.total_len = ntohs(total_len_net);
+    uint16_t total_len = (data[3] << 8) | data[4];
+    packet.header.total_len = total_len;
 
     // type
     packet.header.type = data[5];

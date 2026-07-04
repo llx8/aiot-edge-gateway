@@ -54,3 +54,8 @@ add_executable(test_ShmReader test_ShmReader.cpp)
 target_link_libraries(test_ShmReader gateway_monitor_lib gateway_core_lib GTest::gtest_main)
 
 add_test(NAME ShmReaderTest COMMAND test_ShmReader)
+
+add_executable(test_ModbusRtu test_ModbusRtu.cpp)
+target_link_libraries(test_ModbusRtu common GTest::gtest_main)
+
+add_test(NAME ModbusRtuTest COMMAND test_ModbusRtu)

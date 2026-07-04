@@ -2,6 +2,7 @@
 add_library(gateway_access_lib STATIC
     Session.cpp
     TcpServer.cpp
+    ModbusPoller.cpp
 )
 
 target_include_directories(gateway_access_lib PUBLIC
