@@ -25,15 +25,7 @@ ShmPublisher::ShmPublisher(key_t key)
     }
 
     // 初始化共享内存
-    // 设置魔数
-    if (ptr_->buffers[0].magic != SHM_MAGIC) {
-        std::memset(&ptr_->buffers[0], 0, sizeof(ShmBlock));
-        ptr_->buffers[0].magic = SHM_MAGIC;
-    }
-    if (ptr_->buffers[1].magic != SHM_MAGIC) {
-        std::memset(&ptr_->buffers[1], 0, sizeof(ShmBlock));
-        ptr_->buffers[1].magic = SHM_MAGIC;
-    }
+    std::memset(ptr_, 0, sizeof(ShmRegion));
 }
 
 // 析构函数
@@ -51,10 +43,7 @@ void ShmPublisher::publish(const ShmBlock& block) {
 
     // 复制数据
     ptr_->buffers[indx] = block;
-    // 检查magic
-    if (ptr_->buffers[indx].magic != SHM_MAGIC) {
-        ptr_->buffers[indx].magic = SHM_MAGIC;
-    }
-
-    ptr_->read_index.store(indx, std::memory_order_release); // 更新读索引
+    
+    // 更新读索引
+    ptr_->read_index.store(indx, std::memory_order_release);
 }

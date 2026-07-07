@@ -1,10 +1,8 @@
 find_package(spdlog REQUIRED)
 
 add_library(common STATIC
-    TlvProtocol.cpp
     RingBuffer.cpp
     Logger.cpp
-    Protocol.cpp
     InternalMessage.cpp
     Config.cpp
     ModbusRtu.cpp

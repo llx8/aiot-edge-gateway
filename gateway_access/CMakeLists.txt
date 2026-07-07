@@ -1,8 +1,7 @@
 # 网关核心逻辑库（不含 main，供测试链接）
 add_library(gateway_access_lib STATIC
-    Session.cpp
-    TcpServer.cpp
-    ModbusPoller.cpp
+    ModbusRtuDriver.cpp
+    UdsClient.cpp
 )
 
 target_include_directories(gateway_access_lib PUBLIC

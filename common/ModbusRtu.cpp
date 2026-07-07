@@ -1,7 +1,6 @@
 #include "ModbusRtu.h"
 #include <cstdint>
 #include <vector>
-#include "TlvProtocol.h"
 
 // 功能码
 #define MODBUS_FUNCTION_CODE 0x03
@@ -53,4 +52,20 @@ bool decode_response(const uint8_t* data, size_t len, ModbusResponse& resp){
         resp.registers[i] = (data[3 + i * 2] << 8) | data[3 + i * 2 + 1];
     }
     return true;
+}
+
+// 计算crc16
+// CRC16-Modbus 查表法
+uint16_t crc16_modbus(const uint8_t* data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xA001;
+            else
+                crc >>= 1;
+        }
+    }
+    return crc;
 }

@@ -23,9 +23,11 @@ int main(){
 
     auto config = load_config("conf/gateway.conf");
     std::string uds_path = config["uds"]["data_path"];
+    std::string engine_path = config["uds"]["engine_path"];
     std::string db_path = config["sqlite"]["db_path"];
 
-    EventLoop event_loop(uds_path);
+    // 监听两个 UDS：进程A(数据) + 进程E(AI)
+    EventLoop event_loop({uds_path, engine_path});
     g_event_loop = &event_loop;
 
     DbWriter db_writer(db_path);
@@ -38,7 +40,13 @@ int main(){
     event_loop.set_data_callback([&](const InternalMessage& msg){
         total_packets++;
 
-        // 异步入队，零阻塞
+        // AI 检测结果（M1 阶段只打日志，M3 完整处理）
+        if (msg.source_type == 3) {
+            logger->info("AI检测结果（M1未处理）: node={}, tlv_type={}", msg.node_id, msg.tlv_type);
+            return;
+        }
+
+        // 传感器数据：异步入队
         DbRecord record;
         record.type = DbOpType::SENSOR;
         record.source_type = msg.source_type;
@@ -48,7 +56,6 @@ int main(){
         db_writer.push(record);
 
         ShmBlock block{};
-        block.magic = SHM_MAGIC;
         block.total_packets = total_packets;
         shm_publisher.publish(block);
 

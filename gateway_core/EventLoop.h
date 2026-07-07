@@ -9,8 +9,8 @@
 
 class EventLoop {
 public:
-    // 构造函数
-    explicit EventLoop(const std::string& uds_path, size_t buffer_size = 65536); // 默认缓冲区大小为64KB
+    // 构造函数：支持多个 UDS 路径
+    explicit EventLoop(const std::vector<std::string>& uds_paths, size_t buffer_size = 65536);
 
     // 析构函数
     ~EventLoop();
@@ -25,25 +25,24 @@ public:
     void set_data_callback(DataCallback cb);
 
 private:
-    std::string uds_path_;
+    std::vector<std::string> uds_paths_;
     int epoll_fd_;
-    int listen_fd_;
+    std::unordered_set<int> listen_fds_;   // 多个监听 fd
     RingBuffer ring_buffer_;
     bool running_;
     std::unordered_set<int> client_fds_;
     DataCallback data_callback_;
     
-    static constexpr size_t kBufferSize = 65536; // 64KB buffer size
+    static constexpr size_t kBufferSize = 65536;
     static constexpr int kMaxEvents = 16;
 
-    // 设置非阻塞模式
     static void set_nonblocking(int fd);
 
-    // 绑定监听，返回listen_fd
-    int setup();
+    // 绑定所有 UDS 路径
+    void setup();
 
     // 接受连接
-    void accept_connection();
+    void accept_connection(int listen_fd);
 
     // 读取数据到环形缓冲区，解析返回消息列表
     std::vector<InternalMessage> handle_client_data(int client_fd);

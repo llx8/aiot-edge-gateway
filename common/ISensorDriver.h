@@ -4,9 +4,9 @@
 #include <string_view>
 
 // 纯虚函数提供给南向协议的接口
-class ISouthbound{
+class ISensorDriver{
 public:
-    virtual ~ISouthbound() = default;
+    virtual ~ISensorDriver() = default;
 
     // 启动
     virtual void start() = 0;

@@ -7,8 +7,6 @@
 #define SHM_MAGIC  0x47574D4D
 
 struct ShmBlock{
-    uint32_t magic;         // 0x47574D4D
-    uint64_t version;       // 版本
     int64_t uptime_sec;     // 运行时间
     int32_t total_packets;  // 总包数
     int32_t total_alarms;   // 总告警数
@@ -18,8 +16,15 @@ struct ShmBlock{
     int32_t mqtt_connected; // mqtt连接数
     int32_t alarm_active;   // 激活的告警数
     char last_alarm[128];   // 最后一个告警
-    // M2预留：Ping-Pong双缓冲扩展区
-    uint8_t reserved[64];
+    float npu_temp_c;       // NPU温度
+    float inference_fps;    // 推理帧率
+    int32_t ai_engine_online; // 进程E是否在线
+    int32_t model_version;    // 模型版本号
+    uint32_t last_detection_ts; // 最后一次检测时间戳
+    char last_model_name[64];   // 当前模型名称
+    int32_t snapshot_jpeg_len;  // 最后一次快照JPEG长度
+
+    uint8_t reserved[64]; // 预留空间
 };
 
 struct ShmRegion{

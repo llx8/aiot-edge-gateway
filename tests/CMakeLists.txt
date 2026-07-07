@@ -6,31 +6,18 @@ if(NOT GTest_FOUND)
     add_subdirectory(/usr/src/googletest "${CMAKE_CURRENT_BINARY_DIR}/googletest" EXCLUDE_FROM_ALL)
 endif()
 
-add_executable(test_TlvProtocol test_TlvProtocol.cpp)
-target_link_libraries(test_TlvProtocol common GTest::gtest_main)
-
 add_executable(test_RingBuffer test_RingBuffer.cpp)
 target_link_libraries(test_RingBuffer common GTest::gtest_main)
 
 add_executable(test_ShmLayout test_ShmLayout.cpp)
 target_link_libraries(test_ShmLayout common GTest::gtest_main)
 
-add_executable(test_Protocol test_Protocol.cpp)
-target_link_libraries(test_Protocol common GTest::gtest_main)
-
-add_executable(test_Session test_Session.cpp)
-target_include_directories(test_Session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_access)
-target_link_libraries(test_Session common gateway_access_lib GTest::gtest_main)
-
-add_test(NAME TlvProtocolTest COMMAND test_TlvProtocol)
 add_test(NAME RingBufferTest  COMMAND test_RingBuffer)
 add_test(NAME ShmLayoutTest   COMMAND test_ShmLayout)
-add_test(NAME ProtocolTest    COMMAND test_Protocol)
 add_executable(test_InternalMessage test_InternalMessage.cpp)
 target_link_libraries(test_InternalMessage common GTest::gtest_main)
 
 add_test(NAME InternalMessageTest COMMAND test_InternalMessage)
-add_test(NAME SessionTest     COMMAND test_Session)
 
 add_executable(test_SqliteStore test_SqliteStore.cpp)
 target_include_directories(test_SqliteStore PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)

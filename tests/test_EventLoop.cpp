@@ -42,7 +42,7 @@ static bool send_msg(const char* path, const InternalMessage& msg) {
 
 // ==================== 启动和停止 ====================
 TEST_F(EventLoopTest, StartAndStop_DoesNotCrash) {
-    EventLoop loop(kTestSock);
+    EventLoop loop({kTestSock});
 
     std::thread t([&loop]() {
         loop.start();
@@ -59,7 +59,7 @@ TEST_F(EventLoopTest, StartAndStop_DoesNotCrash) {
 
 // ==================== 接受连接 ====================
 TEST_F(EventLoopTest, AcceptsClientConnection) {
-    EventLoop loop(kTestSock);
+    EventLoop loop({kTestSock});
 
     std::thread t([&loop]() {
         loop.start();
@@ -84,7 +84,7 @@ TEST_F(EventLoopTest, AcceptsClientConnection) {
 
 // ==================== 接收数据不崩溃 ====================
 TEST_F(EventLoopTest, ReceivesData_NoCrash) {
-    EventLoop loop(kTestSock);
+    EventLoop loop({kTestSock});
 
     std::thread t([&loop]() {
         loop.start();
@@ -110,7 +110,7 @@ TEST_F(EventLoopTest, ReceivesData_NoCrash) {
 // ==================== 构造/析构资源释放 ====================
 TEST_F(EventLoopTest, Destructor_CleansUpSocketFile) {
     {
-        EventLoop loop(kTestSock);
+        EventLoop loop({kTestSock});
 
         std::thread t([&loop]() {
             loop.start();

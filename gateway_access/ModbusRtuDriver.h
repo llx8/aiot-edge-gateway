@@ -1,14 +1,14 @@
 #pragma once
-#include "ISouthbound.h"
+#include "ISensorDriver.h"
 #include <string>
 #include <thread>
 
-class ModbusPoller : public ISouthbound {
+class ModbusRtuDriver : public ISensorDriver {
 public:
     // 构造函数
-    ModbusPoller(const std::string& serial_port, uint8_t slave_addr, uint16_t poll_interval_ms, uint16_t reg_start, uint16_t reg_count);
+    ModbusRtuDriver(const std::string& serial_port, uint8_t slave_addr, uint16_t poll_interval_ms, uint16_t reg_start, uint16_t reg_count);
     // 析构函数
-    ~ModbusPoller();
+    ~ModbusRtuDriver();
     // 启动轮询线程
     void start() override;
     // 停止轮询线程

@@ -21,10 +21,11 @@ ShmReader::ShmReader(key_t key)
         ptr_ = nullptr;
         return;
     }
-    // 检查magic, 确认B进程已经初始化共享内存
-    if (ptr_->buffers[0].magic != SHM_MAGIC && ptr_->buffers[1].magic != SHM_MAGIC) {
-        GetLogger("gateway_monitor")->error("Shared memory magic mismatch");
-        // 不置空ptr_, 后面read再检查magic
+    // 检查read_index是否合法
+    uint32_t idx = ptr_->read_index.load(std::memory_order_acquire);
+    if (idx > 1) {
+        GetLogger("gateway_monitor")->error("Invalid read index: {}", idx);
+        // 不置空ptr_, 后面read再检查read_index
     }
 }
 
@@ -41,11 +42,6 @@ bool ShmReader::read(ShmBlock& block) {
 
     // 读取当前索引
     uint32_t idx = ptr_->read_index.load(std::memory_order_acquire);
-    // 检查magic, 确认B进程已经初始化共享内存
-    if (ptr_->buffers[idx].magic != SHM_MAGIC) {
-        GetLogger("gateway_monitor")->error("Shared memory magic mismatch");
-        return false;
-    }
     // 更新last_read_index_
     last_read_index_ = idx;
     // 拷贝数据

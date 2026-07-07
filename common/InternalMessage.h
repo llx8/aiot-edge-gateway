@@ -6,9 +6,9 @@
 
 // 内部消息
 struct InternalMessage {
-    int32_t source_type; // 0 = TCP, 1 = Modbus
+    int32_t source_type; // 0 = Modbus, 1 = GPIO, 2 = I2C, 3 = AI_DETECTION
     int32_t node_id;      // 节点ID
-    uint8_t tlv_type;    // TLV类型
+    uint8_t tlv_type;    // 0x01=传感器, 0x04 = AI视觉告警, 0x05 = AI心跳, 0xFF = 设备心跳
     std::vector<uint8_t> payload; // 数据
 };
 

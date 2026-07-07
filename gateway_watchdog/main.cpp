@@ -6,21 +6,26 @@
 #include <ctime>
 
 // 全局变量，用于保存子进程PID
-pid_t g_children[3] = {0, 0, 0};
+// 索引：0=B(gateway_core), 1=A(gateway_access), 2=C(gateway_monitor), 3=E(gateway_engine)
+pid_t g_children[4] = {0, 0, 0, 0};
 
-// 进程名和路径，与 g_children 索引对应：0=B, 1=A, 2=C
-const char* g_names[3] = {"gateway_core", "gateway_access", "gateway_monitor"};
-const char* g_paths[3] = {"./build/gateway_core/gateway_core", "./build/gateway_access/gateway_access", "./build/gateway_monitor/gateway_monitor"};
+const char* g_names[4] = {"gateway_core", "gateway_access", "gateway_monitor", "gateway_engine"};
+const char* g_paths[4] = {
+    "./build/gateway_core/gateway_core",
+    "./build/gateway_access/gateway_access",
+    "./build/gateway_monitor/gateway_monitor",
+    "./build/gateway_engine/gateway_engine"
+};
 
 // 退避策略：记录最近 5 次重启时间
 static constexpr int kMaxRestarts = 5;
 static constexpr int kWindowSec = 30;
-time_t g_restart_times[3][kMaxRestarts] = {};
-int g_restart_idx[3] = {0, 0, 0};
+time_t g_restart_times[4][kMaxRestarts] = {};
+int g_restart_idx[4] = {0, 0, 0, 0};
 
 // 信号处理函数
 void signal_handler(int signum) {
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (g_children[i] > 0) {
             kill(g_children[i], SIGTERM);
         }
@@ -75,9 +80,13 @@ int main() {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    // 启动顺序：B → A → C（间隔 500ms）
+    // 启动顺序：B → E → A → C（间隔 500ms）
     g_children[0] = start_child(0);  // gateway_core
     if (g_children[0] == -1) return 1;
+    usleep(500000);
+
+    g_children[3] = start_child(3);  // gateway_engine
+    if (g_children[3] == -1) return 1;
     usleep(500000);
 
     g_children[1] = start_child(1);  // gateway_access
@@ -93,7 +102,7 @@ int main() {
         pid_t pid = waitpid(-1, &status, WNOHANG);
 
         if (pid > 0) {
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 4; ++i) {
                 if (g_children[i] == pid) {
                     if (WIFEXITED(status)) {
                         printf("[watchdog] %s (PID %d) exited with status %d\n",

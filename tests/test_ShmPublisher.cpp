@@ -16,8 +16,8 @@ protected:
     }
 };
 
-// ==================== 构造后 magic 正确 ====================
-TEST_F(ShmPublisherTest, Constructor_SetsMagic) {
+// ==================== 构造后 read_index 为 0 ====================
+TEST_F(ShmPublisherTest, Constructor_InitReadIndex) {
     ShmPublisher pub(kTestKey);
 
     int shmid = shmget(kTestKey, sizeof(ShmRegion), 0);
@@ -26,9 +26,8 @@ TEST_F(ShmPublisherTest, Constructor_SetsMagic) {
     ShmRegion* region = static_cast<ShmRegion*>(shmat(shmid, nullptr, SHM_RDONLY));
     ASSERT_NE(region, reinterpret_cast<void*>(-1));
 
-    // 两个缓冲区都应该有 magic
-    EXPECT_EQ(region->buffers[0].magic, SHM_MAGIC);
-    EXPECT_EQ(region->buffers[1].magic, SHM_MAGIC);
+    // 初始化后 read_index 应该为 0
+    EXPECT_EQ(region->read_index.load(std::memory_order_acquire), 0u);
 
     shmdt(region);
 }
@@ -38,8 +37,6 @@ TEST_F(ShmPublisherTest, Publish_WritesData) {
     ShmPublisher pub(kTestKey);
 
     ShmBlock block{};
-    block.magic = SHM_MAGIC;
-    block.version = 42;  // 这个值会被 publisher 覆盖
     block.total_packets = 100;
     block.total_alarms = 3;
     block.cpu_usage = 0.75f;
@@ -56,8 +53,6 @@ TEST_F(ShmPublisherTest, Publish_WritesData) {
     int idx = region->read_index.load(std::memory_order_acquire);
     const ShmBlock& buf = region->buffers[idx];
 
-    EXPECT_EQ(buf.magic, SHM_MAGIC);
-    EXPECT_EQ(buf.version % 2, 0u);  // version 应该是偶数（可读）
     EXPECT_EQ(buf.total_packets, 100);
     EXPECT_EQ(buf.total_alarms, 3);
     EXPECT_FLOAT_EQ(buf.cpu_usage, 0.75f);
@@ -73,12 +68,10 @@ TEST_F(ShmPublisherTest, Publish_OverwritesOldData) {
     ShmPublisher pub(kTestKey);
 
     ShmBlock block1{};
-    block1.magic = SHM_MAGIC;
     block1.total_packets = 10;
     pub.publish(block1);
 
     ShmBlock block2{};
-    block2.magic = SHM_MAGIC;
     block2.total_packets = 20;
     pub.publish(block2);
 
@@ -89,27 +82,31 @@ TEST_F(ShmPublisherTest, Publish_OverwritesOldData) {
     int idx = region->read_index.load(std::memory_order_acquire);
     const ShmBlock& buf = region->buffers[idx];
 
-    EXPECT_EQ(buf.magic, SHM_MAGIC);
-    EXPECT_EQ(buf.version % 2, 0u);  // 偶数（可读）
     EXPECT_EQ(buf.total_packets, 20);
 
     shmdt(region);
 }
 
-// ==================== publish 保证 magic 正确（即使 caller 忘了设） ====================
-TEST_F(ShmPublisherTest, Publish_EnsuresMagic) {
+// ==================== publish 切换 read_index ====================
+TEST_F(ShmPublisherTest, Publish_SwitchesReadIndex) {
     ShmPublisher pub(kTestKey);
 
     ShmBlock block{};
-    block.magic = 0xDEADBEEF;  // 错误值
-    pub.publish(block);
+    block.total_packets = 1;
 
+    // 第一次发布：read_index 从 0 切到 1
+    pub.publish(block);
     int shmid = shmget(kTestKey, sizeof(ShmRegion), 0);
     ShmRegion* region = static_cast<ShmRegion*>(shmat(shmid, nullptr, SHM_RDONLY));
+    EXPECT_EQ(region->read_index.load(std::memory_order_acquire), 1u);
 
-    // 读活跃缓冲区
-    int idx = region->read_index.load(std::memory_order_acquire);
-    EXPECT_EQ(region->buffers[idx].magic, SHM_MAGIC);  // publish 纠正了
+    // 第二次发布：read_index 从 1 切回 0
+    block.total_packets = 2;
+    pub.publish(block);
+    EXPECT_EQ(region->read_index.load(std::memory_order_acquire), 0u);
+
+    // 验证数据正确
+    EXPECT_EQ(region->buffers[0].total_packets, 2);
 
     shmdt(region);
 }

@@ -1,4 +1,4 @@
-#include "ModbusPoller.h"
+#include "ModbusRtuDriver.h"
 #include <chrono>
 #include <fcntl.h>
 #include <termios.h>
@@ -12,7 +12,7 @@
 
 
 // 构造函数
-ModbusPoller::ModbusPoller(const std::string& serial_port, uint8_t slave_addr, uint16_t poll_interval_ms, uint16_t reg_start, uint16_t reg_count)
+ModbusRtuDriver::ModbusRtuDriver(const std::string& serial_port, uint8_t slave_addr, uint16_t poll_interval_ms, uint16_t reg_start, uint16_t reg_count)
     : serial_port_(serial_port)
     , slave_addr_(slave_addr)
     , poll_interval_ms_(poll_interval_ms)
@@ -23,17 +23,17 @@ ModbusPoller::ModbusPoller(const std::string& serial_port, uint8_t slave_addr, u
 }
 
 // 析构函数
-ModbusPoller::~ModbusPoller()
+ModbusRtuDriver::~ModbusRtuDriver()
 {
     stop();
 }
 
 // 打开串口文件
-bool ModbusPoller::open_serial() {
+bool ModbusRtuDriver::open_serial() {
     // 打开文件
     int fd = open(serial_port_.c_str(), O_RDWR | O_NOCTTY);
     if (fd < 0) {
-        GetLogger("ModbusPoller")->error("Failed to open serial port: {}", serial_port_);
+        GetLogger("ModbusRtuDriver")->error("Failed to open serial port: {}", serial_port_);    
         return false;
     }
     struct termios options{};
@@ -54,28 +54,28 @@ bool ModbusPoller::open_serial() {
 }
 
 // write (event_fd)
-void ModbusPoller::notify_main_thread(){
+void ModbusRtuDriver::notify_main_thread(){
     uint64_t cnt = 1;
     write(event_fd_, &cnt, sizeof(cnt));
 }
 
 // 启动轮询线程
-void ModbusPoller::start() {
+void ModbusRtuDriver::start() {
     if (!open_serial()) {
-        GetLogger("ModbusPoller")->error("Failed to open serial port: {}", serial_port_);
+        GetLogger("ModbusRtuDriver")->error("Failed to open serial port: {}", serial_port_);
         return;
     }
     event_fd_ = eventfd(0, EFD_NONBLOCK);
     if (event_fd_ < 0) {
-        GetLogger("ModbusPoller")->error("Failed to create eventfd: {}", strerror(errno));
+        GetLogger("ModbusRtuDriver")->error("Failed to create eventfd: {}", strerror(errno));
         return;
     }
     running_ = true;
-    poll_thread_ = std::thread(&ModbusPoller::poll_loop, this);
+    poll_thread_ = std::thread(&ModbusRtuDriver::poll_loop, this);
 }
 
 // 停止轮询线程
-void ModbusPoller::stop() {
+void ModbusRtuDriver::stop() {
     running_ = false;
     if (poll_thread_.joinable()) {
         poll_thread_.join();
@@ -90,16 +90,16 @@ void ModbusPoller::stop() {
     }
 }
 
-int ModbusPoller::event_fd() const {
+int ModbusRtuDriver::event_fd() const {
     return event_fd_;
 }
 
-std::string_view ModbusPoller::name() const {
+std::string_view ModbusRtuDriver::name() const {
     return "Modbus-RTU";
 }
 
 // 主循环，轮询串口数据并处理
-void ModbusPoller::poll_loop() {
+void ModbusRtuDriver::poll_loop() {
     while (running_) {
         // 1 编码请求
         ModbusRequest req{slave_addr_, 0x03, reg_start_, reg_count_};

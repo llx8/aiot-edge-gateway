@@ -24,3 +24,6 @@ std::vector<uint8_t> encode_request(const ModbusRequest& req);
 
 // 解码
 bool decode_response(const uint8_t* data, size_t len, ModbusResponse& resp);
+
+// 计算crc16
+uint16_t crc16_modbus(const uint8_t* data, size_t len);

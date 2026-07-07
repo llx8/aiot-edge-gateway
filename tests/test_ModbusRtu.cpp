@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include "ModbusRtu.h"
-#include "TlvProtocol.h"  // crc16_modbus
 
 // ========== 编码测试 ==========
 
