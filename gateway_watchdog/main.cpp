@@ -62,8 +62,7 @@ pid_t start_child(int idx) {
         perror("fork failed");
         return -1;
     } else if (pid == 0) {
-        // 子进程：切换到项目根目录再 execv
-        chdir("/home/lxxxxl/桌面/GitHub/aiot-edge-gateway");
+        // 子进程：继承父进程的工作目录（启动脚本已 cd 到项目根目录）
         execv(g_paths[idx], argv);
         perror("execv failed");
         _exit(1);

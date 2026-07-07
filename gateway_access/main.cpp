@@ -39,7 +39,7 @@ int main(){
     std::vector<std::unique_ptr<ISensorDriver>> drivers;
 
     // Modbus 驱动
-    auto modbus = std::make_unique<ModbusRtuDriver>("/dev/ttyUSB0", 1, 1000, 0, 1000);
+    auto modbus = std::make_unique<ModbusRtuDriver>("/dev/ttyUSB0", 1, 1000, 0, 10);
     modbus->set_data_callback([&uds](const InternalMessage& msg){
         auto encoded = encode_internal_msg(msg);
         uds.write(encoded.data(), encoded.size());
