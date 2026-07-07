@@ -5,7 +5,7 @@
 ShmReader::ShmReader(key_t key)
     : shmid_(-1)
     , ptr_(nullptr)
-    , last_version_(0)
+    , last_read_index_(0)
 {
     // shmget不加IPC_CREAT标志位，表示只获取已存在的共享内存
     shmid_ = shmget(key, sizeof(ShmRegion), 0666);
@@ -39,20 +39,17 @@ ShmReader::~ShmReader() {
 bool ShmReader::read(ShmBlock& block) {
     if (!ptr_) return false;
 
-    // 找version大的那块
-    int idx = (ptr_->buffers[0].version > ptr_->buffers[1].version) ? 0 : 1;
+    // 读取当前索引
+    uint32_t idx = ptr_->read_index.load(std::memory_order_acquire);
     // 检查magic, 确认B进程已经初始化共享内存
     if (ptr_->buffers[idx].magic != SHM_MAGIC) {
         GetLogger("gateway_monitor")->error("Shared memory magic mismatch");
         return false;
     }
-    // 检查version, 确认数据是否有更新
-    if (ptr_->buffers[idx].version == last_version_) {
-        return false; // 没有新数据
-    }
+    // 更新last_read_index_
+    last_read_index_ = idx;
     // 拷贝数据
     block = ptr_->buffers[idx];
-    last_version_ = block.version;
     return true;
 }
 
@@ -60,6 +57,7 @@ bool ShmReader::read(ShmBlock& block) {
 bool ShmReader::has_new_data() {
     if (!ptr_) return false;
 
-    // 直接检查两个缓冲区的version, 只要有一个比last_version_大，就说明有新数据
-    return (ptr_->buffers[0].version > last_version_) || (ptr_->buffers[1].version > last_version_);
+    uint32_t idx = ptr_->read_index.load(std::memory_order_relaxed);
+    // 直接检查两个缓冲区的索引, 只要有一个比last_read_index_大，就说明有新数据
+    return idx != last_read_index_;
 }

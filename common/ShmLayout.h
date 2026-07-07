@@ -2,6 +2,7 @@
 #define SHM_BLOCK_H
 
 #include <cstdint>
+#include <atomic>
 
 #define SHM_MAGIC  0x47574D4D
 
@@ -23,7 +24,7 @@ struct ShmBlock{
 
 struct ShmRegion{
     ShmBlock buffers[2]; // 双缓冲区
-    uint32_t active_index; // 标记当前可读的缓冲区索引，0或1
+    std::atomic<uint32_t> read_index; // 0或1， 标记当前可读的缓冲区索引
 };
 
 #endif

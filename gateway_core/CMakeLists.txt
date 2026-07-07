@@ -4,6 +4,7 @@ add_library(gateway_core_lib STATIC
     EventLoop.cpp
     SqliteStore.cpp
     ShmPublisher.cpp
+    DbWriter.cpp
 )
 
 target_include_directories(gateway_core_lib PUBLIC

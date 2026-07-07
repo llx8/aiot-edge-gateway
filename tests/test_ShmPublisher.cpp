@@ -53,7 +53,7 @@ TEST_F(ShmPublisherTest, Publish_WritesData) {
     ShmRegion* region = static_cast<ShmRegion*>(shmat(shmid, nullptr, SHM_RDONLY));
 
     // 读活跃缓冲区
-    int idx = region->active_index;
+    int idx = region->read_index.load(std::memory_order_acquire);
     const ShmBlock& buf = region->buffers[idx];
 
     EXPECT_EQ(buf.magic, SHM_MAGIC);
@@ -86,7 +86,7 @@ TEST_F(ShmPublisherTest, Publish_OverwritesOldData) {
     ShmRegion* region = static_cast<ShmRegion*>(shmat(shmid, nullptr, SHM_RDONLY));
 
     // 读活跃缓冲区
-    int idx = region->active_index;
+    int idx = region->read_index.load(std::memory_order_acquire);
     const ShmBlock& buf = region->buffers[idx];
 
     EXPECT_EQ(buf.magic, SHM_MAGIC);
@@ -108,7 +108,7 @@ TEST_F(ShmPublisherTest, Publish_EnsuresMagic) {
     ShmRegion* region = static_cast<ShmRegion*>(shmat(shmid, nullptr, SHM_RDONLY));
 
     // 读活跃缓冲区
-    int idx = region->active_index;
+    int idx = region->read_index.load(std::memory_order_acquire);
     EXPECT_EQ(region->buffers[idx].magic, SHM_MAGIC);  // publish 纠正了
 
     shmdt(region);

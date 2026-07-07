@@ -1,12 +1,10 @@
-include(FetchContent)
-
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-)
-
-FetchContent_MakeAvailable(googletest)
+# 使用系统已安装的 gtest（apt install libgtest-dev）
+find_package(GTest REQUIRED QUIET)
+if(NOT GTest_FOUND)
+    # 回退：从 /usr/src 源码构建
+    message(STATUS "gtest not found via find_package; building from /usr/src...")
+    add_subdirectory(/usr/src/googletest "${CMAKE_CURRENT_BINARY_DIR}/googletest" EXCLUDE_FROM_ALL)
+endif()
 
 add_executable(test_TlvProtocol test_TlvProtocol.cpp)
 target_link_libraries(test_TlvProtocol common GTest::gtest_main)
@@ -59,3 +57,7 @@ add_executable(test_ModbusRtu test_ModbusRtu.cpp)
 target_link_libraries(test_ModbusRtu common GTest::gtest_main)
 
 add_test(NAME ModbusRtuTest COMMAND test_ModbusRtu)
+
+add_executable(test_SpscQueue test_SpscQueue.cpp)
+target_link_libraries(test_SpscQueue common GTest::gtest_main)
+add_test(NAME SpscQueueTest COMMAND test_SpscQueue)

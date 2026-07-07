@@ -21,8 +21,7 @@ EventLoop::EventLoop(const std::string& uds_path, size_t buffer_size)
     , epoll_fd_(-1)
     , listen_fd_(-1)
     , ring_buffer_(buffer_size)
-    , running_(false)
-    , client_fd_(-1) {
+    , running_(false) {
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ < 0) {
         throw std::runtime_error("epoll_create failed");
@@ -33,7 +32,7 @@ EventLoop::EventLoop(const std::string& uds_path, size_t buffer_size)
 EventLoop::~EventLoop() {
     if (listen_fd_ >= 0) close(listen_fd_);
     if (epoll_fd_ >= 0) close(epoll_fd_);
-    if (client_fd_ >= 0) close(client_fd_);
+    for (auto fd : client_fds_) close(fd);
 }
 
 // 绑定监听，返回listen_fd
@@ -74,7 +73,7 @@ int EventLoop::setup() {
 }
 
 // 接受连接
-int EventLoop::accept_connection() {
+void EventLoop::accept_connection() {
     while (true) {
         int fd = accept(listen_fd_, nullptr, nullptr);
         if (fd < 0) {
@@ -82,12 +81,14 @@ int EventLoop::accept_connection() {
                 break; // 没有更多连接
             } else {
                 GetLogger("gateway")->error("accept error: {}", strerror(errno));
-                return -1;
+                return;
             }
         }
         set_nonblocking(fd);
 
-        client_fd_ = fd;
+        client_fds_.insert(fd);
+
+
 
         // 注册到epoll
         struct epoll_event ev{};
@@ -95,7 +96,6 @@ int EventLoop::accept_connection() {
         ev.data.fd = fd;
         epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev);
     }
-    return client_fd_;
 }
 
 // 读取数据到环形缓冲区，解析返回消息列表
@@ -127,7 +127,7 @@ std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
             // 客户端关闭消息
             close(client_fd);
             epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
-            client_fd_ = -1;
+            client_fds_.erase(client_fd);
             GetLogger("gateway")->info("Client disconnected");
             break;
         }
@@ -138,7 +138,7 @@ std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
                 GetLogger("gateway")->error("read error: {}", strerror(errno));
                 close(client_fd);
                 epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
-                client_fd_ = -1;
+                client_fds_.erase(client_fd);
                 break;
             }
         }
@@ -172,7 +172,7 @@ bool EventLoop::start() {
                 close(fd);
                 epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
                 GetLogger("gateway")->info("Client disconnected");
-                client_fd_ = -1;
+                client_fds_.erase(fd);
             }
             else if (ev & EPOLLIN) {
                 auto messages = handle_client_data(fd);

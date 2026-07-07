@@ -5,6 +5,7 @@
 #include <vector>
 #include "InternalMessage.h"
 #include <functional>
+#include <unordered_set>
 
 class EventLoop {
 public:
@@ -29,7 +30,7 @@ private:
     int listen_fd_;
     RingBuffer ring_buffer_;
     bool running_;
-    int client_fd_;
+    std::unordered_set<int> client_fds_;
     DataCallback data_callback_;
     
     static constexpr size_t kBufferSize = 65536; // 64KB buffer size
@@ -42,7 +43,7 @@ private:
     int setup();
 
     // 接受连接
-    int accept_connection();
+    void accept_connection();
 
     // 读取数据到环形缓冲区，解析返回消息列表
     std::vector<InternalMessage> handle_client_data(int client_fd);

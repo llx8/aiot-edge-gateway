@@ -1,5 +1,5 @@
 #include "EventLoop.h"
-#include "SqliteStore.h"
+#include "DbWriter.h"
 #include "ShmPublisher.h"
 #include "Config.h"
 #include "Logger.h"
@@ -28,21 +28,27 @@ int main(){
     EventLoop event_loop(uds_path);
     g_event_loop = &event_loop;
 
-    SqliteStore sqlite_store(db_path);
+    DbWriter db_writer(db_path);
+    db_writer.start();
+
     ShmPublisher shm_publisher(0x47574D4D);
 
     int64_t total_packets = 0;
-    int64_t version = 0;
 
     event_loop.set_data_callback([&](const InternalMessage& msg){
         total_packets++;
-        version++;
 
-        sqlite_store.insert_sensor(msg.source_type, msg.node_id, msg.tlv_type, std::string(msg.payload.begin(), msg.payload.end()));
+        // 异步入队，零阻塞
+        DbRecord record;
+        record.type = DbOpType::SENSOR;
+        record.source_type = msg.source_type;
+        record.node_id = msg.node_id;
+        record.tlv_type = msg.tlv_type;
+        record.data = std::string(msg.payload.begin(), msg.payload.end());
+        db_writer.push(record);
 
         ShmBlock block{};
         block.magic = SHM_MAGIC;
-        block.version = version;
         block.total_packets = total_packets;
         shm_publisher.publish(block);
 
@@ -51,6 +57,8 @@ int main(){
     });
 
     event_loop.start();
+
+    db_writer.stop();
 
     return 0;
 }

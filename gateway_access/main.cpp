@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <vector>
 #include "Config.h"
+#include "ModbusPoller.h"
 
 // 全局指针，供信号处理函数访问 TcpServer 实例
 TcpServer* g_server = nullptr;
@@ -73,21 +74,39 @@ int main(){
     logger->info("Config: port={}, uds_path={}", port, uds_path);
 
     int uds_fd = connect_uds(uds_path);
+    if (uds_fd < 0) {
+        logger->error("UDS connect failed: {}", strerror(errno));
+        return 1;
+    }
+
+    int uds_fd_tcp = uds_fd;
+    int uds_fd_modbus = connect_uds(uds_path);
+
+    // modbus回调函数
+    ModbusPoller modbus_poller("/dev/ttyUSB0", 1, 1000, 0, 1000);
+    modbus_poller.set_data_callback([uds_fd_modbus](const InternalMessage& msg){
+        auto encoded = encode_internal_msg(msg);
+        if (uds_fd_modbus >= 0){
+            write(uds_fd_modbus, encoded.data(), encoded.size());
+        }
+    });
+    modbus_poller.start();
 
     TcpServer server(port);
     g_server = &server;
 
     // 给回调函数添加执行函数
-    server.set_data_callback([uds_fd](const InternalMessage& msg){
+    server.set_data_callback([uds_fd_tcp](const InternalMessage& msg){
         auto encoded = encode_internal_msg(msg);
-        if (uds_fd >= 0){
-            write(uds_fd, encoded.data(), encoded.size());
+        if (uds_fd_tcp >= 0){
+            write(uds_fd_tcp, encoded.data(), encoded.size());
         }
     });
 
     // 启动tcp服务
     server.start();
-    if (uds_fd >= 0) close(uds_fd);
+    close(uds_fd_tcp);
+    close(uds_fd_modbus);
 
     return 0;
 }

@@ -16,5 +16,5 @@ public:
 private:
     int shmid_;
     ShmRegion* ptr_;
-    uint64_t last_version_; // 上次读到的版本号
+    uint32_t last_read_index_; // 上次读到的缓冲区索引
 };

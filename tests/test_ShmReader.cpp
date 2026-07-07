@@ -48,8 +48,8 @@ TEST_F(ShmReaderTest, Read_GetsPublisherData) {
     EXPECT_STREQ(out.last_alarm, "over_temp");
 }
 
-// ==================== version 更新后 has_new_data 返回 true ====================
-TEST_F(ShmReaderTest, HasNewData_DetectsVersionChange) {
+// ==================== 索引更新后 has_new_data 返回 true ====================
+TEST_F(ShmReaderTest, HasNewData_DetectsIndexChange) {
     ShmPublisher pub(kTestKey);
 
     ShmBlock block1{};
@@ -62,11 +62,10 @@ TEST_F(ShmReaderTest, HasNewData_DetectsVersionChange) {
 
     EXPECT_FALSE(reader.has_new_data());
 
-    // 再发布两次，让两个缓冲区的 version 都大于 last_version_
+    // 发布一次，read_index 切换到另一个 buffer
     ShmBlock block2{};
     block2.magic = SHM_MAGIC;
     block2.total_packets = 42;
-    pub.publish(block2);
     pub.publish(block2);
 
     EXPECT_TRUE(reader.has_new_data());

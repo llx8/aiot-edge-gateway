@@ -90,6 +90,14 @@ void ModbusPoller::stop() {
     }
 }
 
+int ModbusPoller::event_fd() const {
+    return event_fd_;
+}
+
+std::string_view ModbusPoller::name() const {
+    return "Modbus-RTU";
+}
+
 // 主循环，轮询串口数据并处理
 void ModbusPoller::poll_loop() {
     while (running_) {

@@ -46,24 +46,15 @@ ShmPublisher::~ShmPublisher() {
 // 发布数据
 void ShmPublisher::publish(const ShmBlock& block) {
     // 直接读标记索引
-    int idx = ptr_->active_index;
+    int idx = ptr_->read_index.load(std::memory_order_acquire);
     int indx = 1 - idx; // 选择另一个缓冲区
-    // 标记正在写
-    ptr_->buffers[indx].version++; // 先增加版本号，表示正在写
-    std::atomic_thread_fence(std::memory_order_release);
 
     // 复制数据
-    uint64_t version = ptr_->buffers[indx].version;
     ptr_->buffers[indx] = block;
-    ptr_->buffers[indx].version = version;
-    std::atomic_thread_fence(std::memory_order_release);
     // 检查magic
     if (ptr_->buffers[indx].magic != SHM_MAGIC) {
         ptr_->buffers[indx].magic = SHM_MAGIC;
     }
-    ptr_->buffers[indx].version++; // 再增加版本号，表示写完了
-    std::atomic_thread_fence(std::memory_order_release);
 
-    ptr_->active_index = indx; // 更新活跃索引
-    std::atomic_thread_fence(std::memory_order_release);
+    ptr_->read_index.store(indx, std::memory_order_release); // 更新读索引
 }
