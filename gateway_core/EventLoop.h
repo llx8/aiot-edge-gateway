@@ -6,6 +6,7 @@
 #include "InternalMessage.h"
 #include <functional>
 #include <unordered_set>
+#include <unordered_map>
 
 class EventLoop {
 public:
@@ -24,6 +25,8 @@ public:
     using DataCallback = std::function<void(const InternalMessage&)>;
     void set_data_callback(DataCallback cb);
 
+    using FdCallback = std::function<void(int fd)>;
+    void add_external_fd(int fd, FdCallback cb);
 private:
     std::vector<std::string> uds_paths_;
     int epoll_fd_;
@@ -31,6 +34,7 @@ private:
     RingBuffer ring_buffer_;
     bool running_;
     std::unordered_set<int> client_fds_;
+    std::unordered_map<int, FdCallback> fd_callbacks_;
     DataCallback data_callback_;
     
     static constexpr size_t kBufferSize = 65536;

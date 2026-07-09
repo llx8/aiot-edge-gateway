@@ -147,6 +147,12 @@ bool EventLoop::start() {
             if (listen_fds_.count(fd)) {
                 accept_connection(fd);
             }
+            else if (fd_callbacks_.count(fd)) {
+                // 消费eventfd
+                uint64_t val;
+                while (read(fd, &val, sizeof(val)) > 0) {}
+                fd_callbacks_[fd](fd);
+            }
             else if (ev & (EPOLLERR | EPOLLRDHUP | EPOLLHUP)) {
                 close(fd);
                 epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
@@ -172,4 +178,13 @@ void EventLoop::stop() {
 
 void EventLoop::set_data_callback(DataCallback cb) {
     data_callback_ = std::move(cb);
+}
+
+void EventLoop::add_external_fd(int fd, FdCallback cb) {
+    fd_callbacks_[fd] = std::move(cb);
+    // 通知epoll监听新fd
+    struct epoll_event ev{};
+    ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
+    ev.data.fd = fd;
+    epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev);
 }
