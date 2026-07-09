@@ -5,11 +5,13 @@
 #include <cstring>
 #include <cerrno>
 #include <stdexcept>
+#include <unistd.h>
 
 // 构造函数
 ShmPublisher::ShmPublisher(key_t key) 
     : shmid_(-1)
     , ptr_(nullptr)
+    , notify_fd_(-1)
 {
     // 创建共享内存
     GetLogger("gateway")->info("Creating shared memory with key: {}", key);
@@ -45,5 +47,16 @@ void ShmPublisher::publish(const ShmBlock& block) {
     ptr_->buffers[indx] = block;
     
     // 更新读索引
-    ptr_->read_index.store(indx, std::memory_order_release);
+    ptr_->read_index.store(indx,std::memory_order_release);
+
+    // 通知qt
+    if (notify_fd_ >= 0) {
+        uint64_t val = 1;
+        write(notify_fd_, &val, sizeof(val));
+    }
+}
+
+// 保存外部传来的fd
+void ShmPublisher::set_notify_fd(int fd){
+    notify_fd_ = fd;
 }

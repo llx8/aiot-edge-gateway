@@ -27,6 +27,11 @@ public:
 
     using FdCallback = std::function<void(int fd)>;
     void add_external_fd(int fd, FdCallback cb);
+
+    // 接受到C进程的消息的回调函数
+    void set_monitor_path(const std::string& path);
+    using FdReceivedCallback = std::function<void(int fd)>;
+    void set_fd_received_callback(FdReceivedCallback cb);
 private:
     std::vector<std::string> uds_paths_;
     int epoll_fd_;
@@ -36,6 +41,12 @@ private:
     std::unordered_set<int> client_fds_;
     std::unordered_map<int, FdCallback> fd_callbacks_;
     DataCallback data_callback_;
+
+    std::string monitor_path_;
+    std::unordered_set<int> monitor_listen_fds_;
+    std::unordered_set<int> monitor_client_fds_;
+    void receive_fd(int client_fd);
+    FdReceivedCallback fd_received_callback_;
     
     static constexpr size_t kBufferSize = 65536;
     static constexpr int kMaxEvents = 16;

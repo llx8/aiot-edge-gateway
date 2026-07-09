@@ -13,7 +13,11 @@ public:
 
     // 发布数据
     void publish(const ShmBlock& block);
+
+    // 保存外部传来的fd
+    void set_notify_fd(int fd);
 private:
     int shmid_;
     ShmRegion* ptr_;
+    int notify_fd_;
 };

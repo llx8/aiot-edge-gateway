@@ -1,6 +1,5 @@
 #include "AlarmTableWidget.h"
 #include <QTableWidget>
-#include <QTimer>
 #include "Logger.h"
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
@@ -24,24 +23,17 @@ AlarmTableWidget::AlarmTableWidget(ShmReader& reader, QWidget* parent)
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->addWidget(table_);
     setLayout(layout);
-
-    // 创建定时器，每秒轮询一次共享内存数据
-    timer_ = new QTimer(this);
-    timer_->setInterval(1000); // 1秒
-    // 连接定时器的timeout信号到槽函数
-    connect(timer_, &QTimer::timeout, this, &AlarmTableWidget::onUpdateTimer);
-    timer_->start();
 }
 
 // 析构函数 不需要手动释放reader_，因为它是引用，不负责生命周期
 AlarmTableWidget::~AlarmTableWidget() {
     // 打印日志
     GetLogger("gateway_monitor")->info("AlarmTableWidget destroyed");
-    // qt对象树会自动释放子控件和定时器
+    // qt对象树会自动释放子控件
 }
 
-// QTimer::timeout()槽函数，用于轮询共享内存数据
-void AlarmTableWidget::onUpdateTimer() {
+// 刷新显示数据
+void AlarmTableWidget::refresh() {
     // 读取共享内存数据
     ShmBlock block;
     if (!reader_.read(block)) {

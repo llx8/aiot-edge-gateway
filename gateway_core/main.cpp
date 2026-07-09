@@ -29,6 +29,7 @@ int main(){
     std::string uds_path = config["uds"]["data_path"];
     std::string engine_path = config["uds"]["engine_path"];
     std::string db_path = config["sqlite"]["db_path"];
+    std::string monitor_path = config["uds"]["monitor_path"];
 
     // 规则引擎
     RuleEngine rule_engine;
@@ -66,6 +67,7 @@ int main(){
     
     // 监听两个 UDS：进程A(数据) + 进程E(AI)
     EventLoop event_loop({uds_path, engine_path});
+    event_loop.set_monitor_path(monitor_path);
     g_event_loop = &event_loop;
 
     DbWriter db_writer(db_path);
@@ -101,6 +103,10 @@ int main(){
     });
 
     ShmPublisher shm_publisher(0x47574D4D);
+
+    event_loop.set_fd_received_callback([&](int fd) {
+    shm_publisher.set_notify_fd(fd);
+    });
 
     int64_t total_packets = 0;
 

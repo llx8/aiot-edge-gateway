@@ -18,7 +18,7 @@ EventLoop::EventLoop(const std::vector<std::string>& uds_paths, size_t buffer_si
     : uds_paths_(uds_paths)
     , epoll_fd_(-1)
     , ring_buffer_(buffer_size)
-    , running_(false) {
+    , running_(false){
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ < 0) {
         throw std::runtime_error("epoll_create failed");
@@ -29,7 +29,10 @@ EventLoop::~EventLoop() {
     for (auto fd : listen_fds_) close(fd);
     if (epoll_fd_ >= 0) close(epoll_fd_);
     for (auto fd : client_fds_) close(fd);
+    for (auto fd : monitor_client_fds_) close(fd);
 }
+
+
 
 void EventLoop::setup() {
     for (const auto& path : uds_paths_) {
@@ -74,7 +77,11 @@ void EventLoop::accept_connection(int listen_fd) {
             }
         }
         set_nonblocking(fd);
-        client_fds_.insert(fd);
+        if (monitor_listen_fds_.count(listen_fd)) {
+            monitor_client_fds_.insert(fd);
+        } else {
+            client_fds_.insert(fd);
+        }
 
         struct epoll_event ev{};
         ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
@@ -83,7 +90,36 @@ void EventLoop::accept_connection(int listen_fd) {
     }
 }
 
+void EventLoop::receive_fd(int fd) {
+    char dummy;
+    struct iovec iov = {&dummy, 1};
+
+    char cmsg_buf[CMSG_SPACE(sizeof(int))];
+    struct msghdr msg = {};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf;
+    msg.msg_controllen = CMSG_SPACE(sizeof(int));
+    
+    if (recvmsg(fd, &msg, 0) < 0) {
+        return;
+    }
+
+    struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+    if (cmsg && cmsg->cmsg_level == SOL_SOCKET 
+        && cmsg->cmsg_type == SCM_RIGHTS) {
+        int received_fd = *(int*)CMSG_DATA(cmsg);
+        if (fd_received_callback_) {
+            fd_received_callback_(received_fd);
+        }
+    }
+}
+
 std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
+    if (monitor_client_fds_.count(client_fd)) {
+        receive_fd(client_fd);
+        return {};
+    }
     uint8_t buffer[4096];
     size_t total_read = 0;
     std::vector<InternalMessage> messages;
@@ -144,6 +180,11 @@ bool EventLoop::start() {
             int fd = events[i].data.fd;
             uint32_t ev = events[i].events;
 
+            if (listen_fds_.count(fd) || monitor_listen_fds_.count(fd)) {
+                accept_connection(fd);
+                continue;
+            }
+
             if (listen_fds_.count(fd)) {
                 accept_connection(fd);
             }
@@ -156,8 +197,13 @@ bool EventLoop::start() {
             else if (ev & (EPOLLERR | EPOLLRDHUP | EPOLLHUP)) {
                 close(fd);
                 epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
-                GetLogger("gateway_core")->info("Client disconnected");
-                client_fds_.erase(fd);
+                if (monitor_client_fds_.count(fd)) {
+                    GetLogger("gateway_core")->info("Monitor client disconnected");
+                    monitor_client_fds_.erase(fd);
+                } else {
+                    GetLogger("gateway_core")->info("Client disconnected");
+                    client_fds_.erase(fd);
+                }
             }
             else if (ev & EPOLLIN) {
                 auto messages = handle_client_data(fd);
@@ -187,4 +233,32 @@ void EventLoop::add_external_fd(int fd, FdCallback cb) {
     ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
     ev.data.fd = fd;
     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev);
+}
+
+void EventLoop::set_fd_received_callback(FdReceivedCallback cb) {
+    fd_received_callback_ = std::move(cb);
+}
+
+void EventLoop::set_monitor_path(const std::string& path) {
+    monitor_path_ = path;
+    int listen_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if (listen_fd < 0) {
+        throw std::runtime_error("socket failed for monitor: " + path);
+    }
+    set_nonblocking(listen_fd);
+    unlink(path.c_str());
+
+    struct sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+    bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr));
+    listen(listen_fd, SOMAXCONN);
+
+    struct epoll_event ev{};
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = listen_fd;
+    epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, listen_fd, &ev);
+
+    monitor_listen_fds_.insert(listen_fd);
+    GetLogger("gateway_core")->info("Monitor UDS path {}", path);
 }

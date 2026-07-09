@@ -2,6 +2,8 @@
 
 #include <QMainWindow>
 #include "ShmReader.h"
+#include <QSocketNotifier>
+#include <string>
 
 class DashboardWidget;
 class AlarmTableWidget;
@@ -13,8 +15,12 @@ public:
     explicit MonitorWindow(QWidget* parent = nullptr);
     // 析构函数，销毁ShmReader对象
     ~MonitorWindow();
+private slots:
+    void onShmNotify();
 private:
     ShmReader* reader_; // MonitorWindow负责创建和销毁ShmReader对象
     DashboardWidget* dashboard_;// 显示CPU、内存、在线节点数、总包数、总告警数、活动告警数
     AlarmTableWidget* alarm_table_; // 显示告警信息的表格
+    int notify_fd_;
+    QSocketNotifier* notifier_;
 };
