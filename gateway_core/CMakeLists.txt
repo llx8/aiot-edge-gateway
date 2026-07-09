@@ -9,6 +9,7 @@ add_library(gateway_core_lib STATIC
     MqttClient.cpp
     RuleEngine.cpp
     OfflineStore.cpp
+    RpcHandler.cpp
 )
 
 target_include_directories(gateway_core_lib PUBLIC

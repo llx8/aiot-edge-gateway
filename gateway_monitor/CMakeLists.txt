@@ -7,9 +7,8 @@ set(SOURCES
     ShmReader.cpp
     MonitorWindow.cpp
     DashboardWidget.cpp
-    # ChartWidget.cpp
+    SensorChartWidget.cpp
     AlarmTableWidget.cpp
-    # HistoryWidget.cpp
 )
 
 # 头文件列表
@@ -17,9 +16,8 @@ set(HEADERS
     ShmReader.h
     MonitorWindow.h
     DashboardWidget.h
-    # ChartWidget.h
+    SensorChartWidget.h
     AlarmTableWidget.h
-    # HistoryWidget.h
 )
 
 # 先构建库（测试需要链接，后续 UI 文件加入后再构建可执行文件）

@@ -1,8 +1,10 @@
 #include "MonitorWindow.h"
 #include "DashboardWidget.h"
 #include "AlarmTableWidget.h"
+#include "SensorChartWidget.h"
 #include "Logger.h"
 #include <QSplitter>
+#include <QVBoxLayout>
 #include <QStatusBar>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -18,11 +20,21 @@ MonitorWindow::MonitorWindow(QWidget* parent)
 
     // 创建DashboardWidget和AlarmTableWidget
     dashboard_ = new DashboardWidget(*reader_, this);
+    chart_ = new SensorChartWidget(this);
     alarm_table_ = new AlarmTableWidget(*reader_, this);
 
-    // 使用QSplitter将两个Widget分割
+    // 左侧面板：Dashboard 在上，折线图在下
+    QWidget* left_panel = new QWidget(this);
+    QVBoxLayout* left_layout = new QVBoxLayout(left_panel);
+    left_layout->setContentsMargins(0, 0, 0, 0);
+    left_layout->addWidget(dashboard_);
+    left_layout->addWidget(chart_);
+    left_layout->setStretch(0, 1);
+    left_layout->setStretch(1, 1);
+
+    // 使用QSplitter将左右面板分割
     QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
-    splitter->addWidget(dashboard_);
+    splitter->addWidget(left_panel);
     splitter->addWidget(alarm_table_);
     
     // 设置拉伸比例
@@ -90,4 +102,9 @@ void MonitorWindow::onShmNotify() {
     ::read(notify_fd_, &val, sizeof(val));   // 消费事件
     dashboard_->refresh();
     alarm_table_->refresh();
+    // 用 total_packets 模拟传感器曲线（packets 增长 = 有数据流入）
+    ShmBlock block;
+    if (reader_->read(block)) {
+        chart_->update_value(static_cast<float>(block.total_packets));
+    }
 }

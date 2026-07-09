@@ -6,9 +6,13 @@
 #include <unistd.h>
 #include <vector>
 #include "Config.h"
-#include "ModbusRtuDriver.h"
 #include "ISensorDriver.h"
 #include "UdsClient.h"
+#include "DriverLoader.h"
+#include <filesystem>
+#include <fstream>
+#include <sys/stat.h>
+
 
 static volatile sig_atomic_t g_running = 1;
 
@@ -35,20 +39,24 @@ int main(){
         return 1;
     }
 
-    // 注册驱动
-    std::vector<std::unique_ptr<ISensorDriver>> drivers;
+    // 注册驱动：从插件目录加载所有 .so
+std::vector<std::unique_ptr<ISensorDriver>> drivers;
+auto plugin_dir = config["plugins"]["dir"];  // 如 "/usr/lib/gateway/plugins"
+if (plugin_dir.empty()) plugin_dir = "plugins/";  // 默认
 
-    // Modbus 驱动
-    auto modbus = std::make_unique<ModbusRtuDriver>("/dev/ttyUSB0", 1, 1000, 0, 10);
-    modbus->set_data_callback([&uds](const InternalMessage& msg){
+for (auto& entry : std::filesystem::directory_iterator(plugin_dir)) {
+    if (entry.path().extension() != ".so") continue;
+    DriverLoader loader;
+    if (!loader.load(entry.path().string())) continue;
+    auto driver = loader.create();
+    if (!driver) continue;
+    driver->set_data_callback([&uds](const InternalMessage& msg) {
         auto encoded = encode_internal_msg(msg);
         uds.write(encoded.data(), encoded.size());
     });
-    drivers.push_back(std::move(modbus));
-
-    // 后续注册其他驱动（M2扩展）
-    // auto modbus_tcp = std::make_unique<ModbusTcpDriver>(...);
-    // drivers.push_back(std::move(modbus_tcp));
+    logger->info("Loaded plugin: {}", driver->name());
+    drivers.push_back(std::move(driver));
+}
 
     // 启动所有驱动
     for (auto& driver : drivers) {
@@ -57,6 +65,10 @@ int main(){
     }
 
     // 主循环：等信号退出
+    // 通知 Watchdog：已就绪
+    mkdir("/tmp/gateway_watchdog", 0755);
+    std::ofstream("/tmp/gateway_watchdog/gateway_access.ready") << "1";
+
     while (g_running) {
         pause();
     }

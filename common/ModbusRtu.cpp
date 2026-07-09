@@ -69,3 +69,45 @@ uint16_t crc16_modbus(const uint8_t* data, size_t len) {
     }
     return crc;
 }
+
+// Modbus TCP 请求编码
+std::vector<uint8_t> encode_tcp_request(uint16_t trans_id, const ModbusRequest& req) {
+    // TCP 帧 = 7字节 MBAP头 + 5字节 PDU（无CRC）= 12字节
+    std::vector<uint8_t> result(12);
+    // MBAP 头
+    result[0] = trans_id >> 8;       // 事务ID 高
+    result[1] = trans_id & 0xFF;     // 事务ID 低
+    result[2] = 0x00;                // 协议ID 高
+    result[3] = 0x00;                // 协议ID 低
+    result[4] = 0x00;                // 长度 高
+    result[5] = 0x06;                // 长度 = 单元ID(1) + 功能码(1) + 地址(2) + 数量(2) = 6
+    // MBAP 单元ID + PDU
+    result[6] = req.slave_addr;      // 单元ID
+    result[7] = req.function_code;   // 功能码
+    result[8] = req.start_addr >> 8;
+    result[9] = req.start_addr & 0xFF;
+    result[10] = req.quantity >> 8;
+    result[11] = req.quantity & 0xFF;
+    return result;
+}
+
+// Modbus TCP 响应解码
+bool decode_tcp_response(const uint8_t* data, size_t len, ModbusResponse& resp){
+    if (len < 9) {
+        return false;
+    }
+    // 逐字节解析数据
+    resp.slave_addr = data[6];
+    resp.function_code = data[7];
+    // 检查功能码
+    if (resp.function_code & 0x80) {
+        return false;   // 错误码
+    }
+    uint8_t byte_count = data[8];
+    resp.byte_count = byte_count;
+    resp.registers.resize(byte_count / 2);
+    for (size_t i = 0; i < resp.registers.size(); i++) {
+        resp.registers[i] = (data[9 + i * 2] << 8) | data[9 + i * 2 + 1];
+    }
+    return true;
+}

@@ -251,8 +251,12 @@ void EventLoop::set_monitor_path(const std::string& path) {
     struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
-    bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr));
-    listen(listen_fd, SOMAXCONN);
+    if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        throw std::runtime_error("bind failed for monitor: " + path);
+    }
+    if (listen(listen_fd, SOMAXCONN) < 0) {
+        throw std::runtime_error("listen failed for monitor: " + path);
+    }
 
     struct epoll_event ev{};
     ev.events = EPOLLIN | EPOLLET;

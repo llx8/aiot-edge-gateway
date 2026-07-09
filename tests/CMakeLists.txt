@@ -48,3 +48,12 @@ add_test(NAME ModbusRtuTest COMMAND test_ModbusRtu)
 add_executable(test_SpscQueue test_SpscQueue.cpp)
 target_link_libraries(test_SpscQueue common GTest::gtest_main)
 add_test(NAME SpscQueueTest COMMAND test_SpscQueue)
+
+add_executable(test_ModbusTcp test_ModbusTcp.cpp)
+target_link_libraries(test_ModbusTcp common GTest::gtest_main)
+add_test(NAME ModbusTcpTest COMMAND test_ModbusTcp)
+
+add_executable(test_RuleEngine test_RuleEngine.cpp)
+target_include_directories(test_RuleEngine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
+target_link_libraries(test_RuleEngine gateway_core_lib GTest::gtest_main)
+add_test(NAME RuleEngineTest COMMAND test_RuleEngine)

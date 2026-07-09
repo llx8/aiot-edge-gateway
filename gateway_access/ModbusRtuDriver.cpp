@@ -128,3 +128,7 @@ void ModbusRtuDriver::poll_loop() {
         std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_));
     }
 }
+
+extern "C" ISensorDriver* create_driver() {
+    return new ModbusRtuDriver("/dev/ttyUSB0", 1, 1000, 0, 10);
+}

@@ -27,3 +27,8 @@ bool decode_response(const uint8_t* data, size_t len, ModbusResponse& resp);
 
 // 计算crc16
 uint16_t crc16_modbus(const uint8_t* data, size_t len);
+
+// Modbus TCP 请求编码
+std::vector<uint8_t> encode_tcp_request(uint16_t trans_id, const ModbusRequest& req);
+// Modbus TCP 响应解码
+bool decode_tcp_response(const uint8_t* data, size_t len, ModbusResponse& resp);

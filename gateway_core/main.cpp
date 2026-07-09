@@ -9,6 +9,9 @@
 #include "MqttClient.h"
 #include <mqtt/message.h>
 #include "OfflineStore.h"
+#include "RpcHandler.h"
+#include <fstream>
+#include <sys/stat.h>
 
 EventLoop* g_event_loop = nullptr;
 
@@ -79,6 +82,11 @@ int main(){
     // Mqtt
     MqttClient mqtt(config["mqtt"]["broker_url"], config["mqtt"]["client_id"], config["mqtt"]["will_topic"]);
 
+    RpcHandler rpc_handler;
+    rpc_handler.register_method("get_temp", [&](const std::string& payload){
+        return "temp=25.0";
+    });
+
     mqtt.set_status_callback([&](bool connected) {
         if (connected) {
             need_flush = true;
@@ -87,14 +95,15 @@ int main(){
             logger->warn("MQTT 连接断开");
         }
     });
-
+    
     mqtt.connect();
 
     mqtt.subscribe("spBv1.0/.../DCMD/gw001");
     event_loop.add_external_fd(mqtt.event_fd(), [&](int fd){
         RpcCommand cmd;
         while (mqtt.try_pop_rpc(cmd)) {
-            logger->info("收到RPC指令: topic={}, payload={}", cmd.topic, cmd.payload);
+            std::string resp = rpc_handler.dispatch(cmd.payload);
+            mqtt.publish(cmd.topic, resp);
         }
         if (need_flush && mqtt.is_connected()) {
             offline_store.flush(mqtt);
@@ -147,6 +156,10 @@ int main(){
         logger->info("收到消息: source_type={}, node_id={}, tlv_type={}, payload_len={}", 
             msg.source_type, msg.node_id, msg.tlv_type, msg.payload.size());
     });
+
+    // 通知 Watchdog：已就绪
+    mkdir("/tmp/gateway_watchdog", 0755);
+    std::ofstream("/tmp/gateway_watchdog/gateway_core.ready") << "1";
 
     event_loop.start();
 
