@@ -40,6 +40,12 @@ void Pipeline::setCallback(DetectionCallback cb) {
 
 void Pipeline::on_frame_done() {
     frame_count_++;
+
+    auto now = std::chrono::steady_clock::now();
+    latency_samples_.push_back(now);
+    if (latency_samples_.size() > kMaxLatencySamples) {
+        latency_samples_.pop_front();
+    }
 }
 
 // 计算帧率
@@ -54,6 +60,12 @@ float Pipeline::fps() const {
 bool Pipeline::switch_model(const std::string& path) {
     // 通知推理阶段切换模型
     return inference_->switch_model(path);
+}
+
+float Pipeline::avg_latency_ms() const {
+    if (latency_samples_.size() < 2) return 0.0f;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(latency_samples_.back() - latency_samples_.front());
+    return static_cast<float>(ms.count()) / (latency_samples_.size() - 1);
 }
 
 }

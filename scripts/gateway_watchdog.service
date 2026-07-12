@@ -1,0 +1,13 @@
+[Unit]
+Description=AIoT Edge Gateway Watchdog
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/lxxxxl/GitHub/aiot-edge-gateway/build/gateway_watchdog/gateway_watchdog
+WorkingDirectory=/home/lxxxxl/GitHub/aiot-edge-gateway
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,7 @@ add_library(gateway_core_lib STATIC
     RpcHandler.cpp
     EventFusion.cpp
     EngineManager.cpp
+    ConfigManager.cpp
 )
 
 target_include_directories(gateway_core_lib PUBLIC

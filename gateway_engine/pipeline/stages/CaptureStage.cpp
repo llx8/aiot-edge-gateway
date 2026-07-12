@@ -19,19 +19,18 @@ CaptureStage::~CaptureStage() {
     }
 }
 void CaptureStage::run() {
-    // 构建GStreamer pipeline 字符串
-    std::string pipeline_str = "filesrc location=" + video_path_ + " ! decodebin ! videoconvert ! appsink name=appsink";
-    pipeline_ = gst_parse_launch(pipeline_str.c_str(), nullptr);
-
-    GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline_), "appsink");
-    appsink_ = GST_APP_SINK(sink);
-
-    gst_element_set_state(pipeline_, GST_STATE_PLAYING);
-
     while (running_.load()) {
+        if (pipeline_ == nullptr) {
+            build_pipeline();
+        }
         GstSample* sample = gst_app_sink_pull_sample(appsink_);
         if (!sample) {
-            break;
+            gst_element_set_state(pipeline_, GST_STATE_NULL);
+            gst_object_unref(pipeline_);
+            pipeline_ = nullptr;
+            appsink_ = nullptr;
+            std::this_thread::sleep_for(std::chrono::seconds(1)); // 等一秒再重试
+            continue;
         }
         GstBuffer* buffer = gst_sample_get_buffer(sample);
         GstMapInfo map;
@@ -48,5 +47,21 @@ void CaptureStage::run() {
         gst_sample_unref(sample);
     }
     gst_element_set_state(pipeline_, GST_STATE_NULL);
+    if (pipeline_) {
+        gst_element_set_state(pipeline_, GST_STATE_NULL);
+    }
 }
+
+void CaptureStage::build_pipeline() {
+    // 这个函数独立建 pipeline
+    std::string pipeline_str = "filesrc location=" + video_path_
+        + " ! decodebin ! videoconvert ! appsink name=appsink";
+    pipeline_ = gst_parse_launch(pipeline_str.c_str(), nullptr);
+
+    GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline_), "appsink");
+    appsink_ = GST_APP_SINK(sink);
+
+    gst_element_set_state(pipeline_, GST_STATE_PLAYING);
+}
+
 }

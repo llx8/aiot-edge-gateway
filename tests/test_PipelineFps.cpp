@@ -64,3 +64,34 @@ TEST(PipelineFpsTest, FpsStableBetweenTicks) {
     pipeline.on_frame_done();
     EXPECT_FLOAT_EQ(pipeline.fps(), 2.0f);
 }
+
+// avg_latency_ms：单帧延迟为 0（单帧无法计算间隔）
+TEST(PipelineFpsTest, AvgLatencySingleFrame) {
+    PipelineConfig cfg;
+    Pipeline pipeline(cfg);
+    pipeline.on_frame_done();
+    EXPECT_FLOAT_EQ(pipeline.avg_latency_ms(), 0.0f);
+}
+
+// avg_latency_ms：多帧后延迟应 > 0
+TEST(PipelineFpsTest, AvgLatencyMultipleFrames) {
+    PipelineConfig cfg;
+    Pipeline pipeline(cfg);
+    for (int i = 0; i < 5; ++i) {
+        pipeline.on_frame_done();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_GT(pipeline.avg_latency_ms(), 0.0f);
+}
+
+// avg_latency_ms：窗口上限 30 帧，超过不崩
+TEST(PipelineFpsTest, AvgLatencyWindowLimit) {
+    PipelineConfig cfg;
+    Pipeline pipeline(cfg);
+    for (int i = 0; i < 100; ++i) {
+        pipeline.on_frame_done();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    // 100 帧后 avg_latency 应为正值
+    EXPECT_GT(pipeline.avg_latency_ms(), 0.0f);
+}

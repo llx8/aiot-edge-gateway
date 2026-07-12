@@ -37,7 +37,7 @@ std::shared_ptr<Frame> FramePool::get_frame() {
     do {
         idx = free_head_.load();
         if (idx == -1) return nullptr;
-    }while (free_head_.compare_exchange_strong(idx, free_list_[idx]));
+    }while (!free_head_.compare_exchange_strong(idx, free_list_[idx]));
 
     return std::shared_ptr<Frame>(&frames_[idx], [this, idx](Frame*) {
         release(idx);

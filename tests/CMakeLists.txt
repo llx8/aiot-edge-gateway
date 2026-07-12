@@ -63,6 +63,21 @@ target_include_directories(test_PipelineFps PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_link_libraries(test_PipelineFps gateway_engine_lib GTest::gtest_main)
 add_test(NAME PipelineFpsTest COMMAND test_PipelineFps)
 
+add_executable(test_FramePool test_FramePool.cpp)
+target_include_directories(test_FramePool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_engine)
+target_link_libraries(test_FramePool gateway_engine_lib GTest::gtest_main)
+add_test(NAME FramePoolTest COMMAND test_FramePool)
+
+add_executable(test_PipelineQueue test_PipelineQueue.cpp)
+target_include_directories(test_PipelineQueue PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_engine)
+target_link_libraries(test_PipelineQueue gateway_engine_lib GTest::gtest_main)
+add_test(NAME PipelineQueueTest COMMAND test_PipelineQueue)
+
+add_executable(test_StageBase test_StageBase.cpp)
+target_include_directories(test_StageBase PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_engine)
+target_link_libraries(test_StageBase gateway_engine_lib GTest::gtest_main)
+add_test(NAME StageBaseTest COMMAND test_StageBase)
+
 add_executable(test_EventFusion test_EventFusion.cpp)
 target_include_directories(test_EventFusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
 target_link_libraries(test_EventFusion gateway_core_lib GTest::gtest_main)

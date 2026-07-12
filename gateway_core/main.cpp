@@ -12,6 +12,7 @@
 #include "RpcHandler.h"
 #include "EventFusion.h"
 #include "EngineManager.h"
+#include "ConfigManager.h"
 #include "HttpDashboard.h"
 #include <fstream>
 #include <sys/stat.h>
@@ -37,6 +38,10 @@ int main(){
     std::string db_path = config["sqlite"]["db_path"];
     std::string monitor_path = config["uds"]["monitor_path"];
 
+    // 共享阈值（RPC 更新 → atomic → 规则引擎 lambda 读到新值）
+    std::atomic<float> temp_max{90.0f};
+    std::atomic<float> hum_max{80.0f};
+
     // 规则引擎
     RuleEngine rule_engine;
     // 添加规则
@@ -49,8 +54,8 @@ int main(){
             temp = std::stof(data.substr(pos));
             logger->info("温度值: node={}, temp={}", msg.node_id, temp);
         }
-        return temp > 90.0f;
-    }, 
+        return temp > temp_max.load();
+    },
     [&](const InternalMessage& msg){
         logger->warn("高温告警! node={}", msg.node_id);
         // 后续扩展...
@@ -64,7 +69,7 @@ int main(){
             hum = std::stof(data.substr(pos));
             logger->info("湿度值: node={}, hum={}", msg.node_id, hum);
         }
-        return hum > 80.0f;
+        return hum > hum_max.load();
     }, 
     [&](const InternalMessage& msg){
         logger->warn("高湿度告警! node={}", msg.node_id);
@@ -85,9 +90,29 @@ int main(){
     // Mqtt
     MqttClient mqtt(config["mqtt"]["broker_url"], config["mqtt"]["client_id"], config["mqtt"]["will_topic"]);
 
+    // ── 热加载配置管理器 ──
+    ConfigManager config_manager("conf/gateway.hot.json");
+
+    // 注册 watcher
+    config_manager.watch("rule_engine", "temp_max", [&](const std::string& v) {
+        try { temp_max.store(std::stof(v)); return "ACK"; }
+        catch (...) { return "NACK: temp_max 不是有效数值"; }
+    });
+    config_manager.watch("rule_engine", "hum_max", [&](const std::string& v) {
+        try { hum_max.store(std::stof(v)); return "ACK"; }
+        catch (...) { return "NACK: hum_max 不是有效数值"; }
+    });
+
+    // 启动时加载上次持久化的热配置
+    config_manager.load_persisted();
+
+    // RPC 方法注册
     RpcHandler rpc_handler;
     rpc_handler.register_method("get_temp", [&](const std::string& payload){
         return "temp=25.0";
+    });
+    rpc_handler.register_method("config_update", [&](const std::string& payload){
+        return config_manager.handle_config_update(payload);
     });
 
     mqtt.set_status_callback([&](bool connected) {

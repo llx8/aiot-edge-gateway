@@ -8,6 +8,8 @@
 #include "stages/PostprocessStage.h"
 #include <memory>
 #include <atomic>
+#include <deque>
+#include <chrono>
 
 namespace gateway_engine {
 
@@ -23,6 +25,8 @@ public:
     float fps() const;
     void on_frame_done(); // 每帧处理完成时调用
     void tick_fps(); // 计算帧率
+
+    float avg_latency_ms() const;
 
 private:
     PipelineConfig cfg_;
@@ -41,6 +45,9 @@ private:
 
     std::atomic<int> frame_count_{0}; // 统计帧数
     std::atomic<float> current_fps_{0.0f}; // 当前帧率
+
+    std::deque<std::chrono::steady_clock::time_point> latency_samples_;
+    static constexpr int kMaxLatencySamples = 30;
 };
 
 }
