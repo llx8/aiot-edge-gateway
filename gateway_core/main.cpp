@@ -10,6 +10,8 @@
 #include <mqtt/message.h>
 #include "OfflineStore.h"
 #include "RpcHandler.h"
+#include "EventFusion.h"
+#include "EngineManager.h"
 #include <fstream>
 #include <sys/stat.h>
 
@@ -117,18 +119,50 @@ int main(){
     shm_publisher.set_notify_fd(fd);
     });
 
+    // 事件融合器
+    EventFusion event_fusion;
+    // AI 引擎管理
+    EngineManager engine_manager;
+
+    engine_manager.set_command_sender([](int32_t node_id, uint8_t cmd) {
+        auto logger = GetLogger("gateway_core");
+        logger->info("EngineManager 指令待发送: node={}, cmd=0x{:02x}", node_id, cmd);
+    });
+
     int64_t total_packets = 0;
 
     event_loop.set_data_callback([&](const InternalMessage& msg){
         total_packets++;
 
-        // AI 检测结果（M1 阶段只打日志，M3 完整处理）
+        // AI 检测消息 → EventFusion
         if (msg.source_type == 3) {
-            logger->info("AI检测结果（M1未处理）: node={}, tlv_type={}", msg.node_id, msg.tlv_type);
+            if (msg.tlv_type == 0x05) {
+                engine_manager.on_heartbeat(msg);
+            } else if (msg.tlv_type == 0x04) {
+                auto fusion_result = event_fusion.evaluate(msg);
+                if (fusion_result.has_value()) {
+                    int severity;
+                    std::memcpy(&severity, fusion_result->payload.data()
+                        + fusion_result->payload.size() - 4, 4);
+                    logger->warn("复合告警! node={}, severity={}", msg.node_id, severity);
+
+                    DbRecord record;
+                    record.type = DbOpType::ALARM;
+                    record.source_type = fusion_result->source_type;
+                    record.node_id = fusion_result->node_id;
+                    record.tlv_type = fusion_result->tlv_type;
+                    record.data = std::string(fusion_result->payload.begin(),
+                                              fusion_result->payload.end());
+                    db_writer.push(record);
+                }
+            }
             return;
         }
 
-        // 传感器数据：异步入队
+        // 传感器数据 → 更新 EventFusion 缓存
+        event_fusion.evaluate(msg);
+
+        // 异步入队
         DbRecord record;
         record.type = DbOpType::SENSOR;
         record.source_type = msg.source_type;
@@ -153,7 +187,7 @@ int main(){
             offline_store.insert(data_topic, payload_str);
         }
 
-        logger->info("收到消息: source_type={}, node_id={}, tlv_type={}, payload_len={}", 
+        logger->info("收到消息: source_type={}, node_id={}, tlv_type={}, payload_len={}",
             msg.source_type, msg.node_id, msg.tlv_type, msg.payload.size());
     });
 

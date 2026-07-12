@@ -10,6 +10,8 @@ add_library(gateway_core_lib STATIC
     RuleEngine.cpp
     OfflineStore.cpp
     RpcHandler.cpp
+    EventFusion.cpp
+    EngineManager.cpp
 )
 
 target_include_directories(gateway_core_lib PUBLIC

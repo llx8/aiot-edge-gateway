@@ -1,6 +1,7 @@
 #include "InferenceStage.h"
 #include <chrono>
 #include <thread>
+#include <unistd.h>
 
 namespace gateway_engine {
 
@@ -29,5 +30,13 @@ void InferenceStage::run() {
 
         result.output = nullptr;
     }
+}
+
+bool InferenceStage::switch_model(const std::string& path) {
+    if (access(path.c_str(), F_OK) != 0) {
+        return false;
+    }
+    current_model_path_ = path;
+    return true;
 }
 }

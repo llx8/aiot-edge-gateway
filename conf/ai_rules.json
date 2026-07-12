@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "name": "安全帽缺失高温告警",
+      "ai_class_id": 0,
+      "sensor_condition": "temp > 40.0",
+      "severity": 3
+    },
+    {
+      "name": "区域入侵非工作时间",
+      "ai_class_id": 1,
+      "sensor_condition": "hour < 8 || hour > 18",
+      "severity": 4
+    },
+    {
+      "name": "烟火检测",
+      "ai_class_id": 2,
+      "sensor_condition": "true",
+      "severity": 4
+    }
+  ]
+}

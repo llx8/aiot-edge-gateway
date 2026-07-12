@@ -4,6 +4,12 @@
 #include <cstdint>
 #include <vector>
 
+constexpr uint8_t CMD_START_ANALYSIS = 0x10;
+constexpr uint8_t CMD_STOP_ANALYSIS  = 0x11;
+constexpr uint8_t CMD_SWITCH_MODEL    = 0x12;
+constexpr uint8_t CMD_MODEL_ACK       = 0x13;
+constexpr uint8_t CMD_MODEL_NACK      = 0x14;
+
 // 内部消息
 struct InternalMessage {
     int32_t source_type; // 0 = Modbus, 1 = GPIO, 2 = I2C, 3 = AI_DETECTION

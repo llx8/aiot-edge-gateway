@@ -57,3 +57,13 @@ add_executable(test_RuleEngine test_RuleEngine.cpp)
 target_include_directories(test_RuleEngine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
 target_link_libraries(test_RuleEngine gateway_core_lib GTest::gtest_main)
 add_test(NAME RuleEngineTest COMMAND test_RuleEngine)
+
+add_executable(test_PipelineFps test_PipelineFps.cpp)
+target_include_directories(test_PipelineFps PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_engine)
+target_link_libraries(test_PipelineFps gateway_engine_lib GTest::gtest_main)
+add_test(NAME PipelineFpsTest COMMAND test_PipelineFps)
+
+add_executable(test_EventFusion test_EventFusion.cpp)
+target_include_directories(test_EventFusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
+target_link_libraries(test_EventFusion gateway_core_lib GTest::gtest_main)
+add_test(NAME EventFusionTest COMMAND test_EventFusion)

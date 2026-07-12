@@ -18,11 +18,13 @@ public:
     InferenceStage(
         PipelineQueue<std::shared_ptr<Frame>, 4>* input_queue,     
         PipelineQueue<InferenceResult, 4>* output_queue);          // 推理输出队列
+        bool switch_model(const std::string& path);
 protected:
     void run() override;
 private:
     PipelineQueue<std::shared_ptr<Frame>, 4>* input_queue_;
     PipelineQueue<InferenceResult, 4>* output_queue_;
+    std::string current_model_path_;
 };
 
 }

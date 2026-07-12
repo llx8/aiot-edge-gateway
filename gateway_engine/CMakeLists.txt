@@ -5,6 +5,8 @@ add_library(gateway_engine_lib STATIC
     pipeline/stages/InferenceStage.cpp   
     pipeline/stages/PostprocessStage.cpp   
     pipeline/Pipeline.cpp
+    AnalysisScheduler.cpp
+    HearbeatReporter.cpp
 )
 
 target_include_directories(gateway_engine_lib PUBLIC

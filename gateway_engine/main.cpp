@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <fstream>
 #include <sys/stat.h>
+#include "AnalysisScheduler.h"
+#include "HearbeatReporter.h"
 
 static volatile sig_atomic_t g_running = 1;
 void signal_handler(int) { g_running = 0; }
@@ -49,19 +51,17 @@ int main() {
         }
     });
 
-    pipeline.start();
+    AnalysisScheduler scheduler(pipeline, uds_client.fd());
+    scheduler.start();
 
     // 主循环心跳
+    HeartbeatReporter hearbeat(pipeline, uds_client);
     while (g_running) {
-        InternalMessage msg;
-        msg.source_type = 3;
-        msg.tlv_type = 0x05;
-        msg.payload = {'o', 'k'};
-        auto encoded = encode_internal_msg(msg);
-        uds_client.write(encoded.data(), encoded.size());
+        hearbeat.send_heartbeat();
         sleep(5);
     }
 
+    scheduler.stop();
     pipeline.stop();
 
     logger->info("Shutting down...");

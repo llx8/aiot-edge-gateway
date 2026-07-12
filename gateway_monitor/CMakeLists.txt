@@ -9,6 +9,7 @@ set(SOURCES
     DashboardWidget.cpp
     SensorChartWidget.cpp
     AlarmTableWidget.cpp
+    AiSnapshotWidget.cpp
 )
 
 # 头文件列表
@@ -18,6 +19,7 @@ set(HEADERS
     DashboardWidget.h
     SensorChartWidget.h
     AlarmTableWidget.h
+    AiSnapshotWidget.h
 )
 
 # 先构建库（测试需要链接，后续 UI 文件加入后再构建可执行文件）

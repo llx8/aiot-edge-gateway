@@ -2,6 +2,7 @@
 #include "DashboardWidget.h"
 #include "AlarmTableWidget.h"
 #include "SensorChartWidget.h"
+#include "AiSnapshotWidget.h"
 #include "Logger.h"
 #include <QSplitter>
 #include <QVBoxLayout>
@@ -21,6 +22,8 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     // 创建DashboardWidget和AlarmTableWidget
     dashboard_ = new DashboardWidget(*reader_, this);
     chart_ = new SensorChartWidget(this);
+    ai_snapshot_ = new AiSnapshotWidget(this);
+    ai_snapshot_->setMinimumHeight(280);
     alarm_table_ = new AlarmTableWidget(*reader_, this);
 
     // 左侧面板：Dashboard 在上，折线图在下
@@ -29,8 +32,10 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     left_layout->setContentsMargins(0, 0, 0, 0);
     left_layout->addWidget(dashboard_);
     left_layout->addWidget(chart_);
+    left_layout->addWidget(ai_snapshot_);
     left_layout->setStretch(0, 1);
     left_layout->setStretch(1, 1);
+    left_layout->setStretch(2, 1);
 
     // 使用QSplitter将左右面板分割
     QSplitter* splitter = new QSplitter(Qt::Horizontal, this);

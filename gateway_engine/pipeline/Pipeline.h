@@ -7,6 +7,7 @@
 #include "stages/InferenceStage.h"
 #include "stages/PostprocessStage.h"
 #include <memory>
+#include <atomic>
 
 namespace gateway_engine {
 
@@ -17,6 +18,11 @@ public:
     void start();
     void stop();
     void setCallback(DetectionCallback cb);
+    bool switch_model(const std::string& path);
+
+    float fps() const;
+    void on_frame_done(); // 每帧处理完成时调用
+    void tick_fps(); // 计算帧率
 
 private:
     PipelineConfig cfg_;
@@ -32,6 +38,9 @@ private:
     std::unique_ptr<PreprocessStage> preprocess_;
     std::unique_ptr<InferenceStage> inference_;
     std::unique_ptr<PostprocessStage> postprocess_;
+
+    std::atomic<int> frame_count_{0}; // 统计帧数
+    std::atomic<float> current_fps_{0.0f}; // 当前帧率
 };
 
 }

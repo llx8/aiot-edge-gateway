@@ -38,4 +38,22 @@ void Pipeline::setCallback(DetectionCallback cb) {
     if (postprocess_) postprocess_->setCallback(std::move(cb));
 }
 
+void Pipeline::on_frame_done() {
+    frame_count_++;
+}
+
+// 计算帧率
+void Pipeline::tick_fps() {
+    current_fps_ = frame_count_.exchange(0);
+}
+
+float Pipeline::fps() const {
+    return current_fps_.load();
+}
+
+bool Pipeline::switch_model(const std::string& path) {
+    // 通知推理阶段切换模型
+    return inference_->switch_model(path);
+}
+
 }
