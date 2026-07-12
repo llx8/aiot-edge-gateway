@@ -12,6 +12,7 @@
 #include "RpcHandler.h"
 #include "EventFusion.h"
 #include "EngineManager.h"
+#include "HttpDashboard.h"
 #include <fstream>
 #include <sys/stat.h>
 
@@ -190,6 +191,13 @@ int main(){
         logger->info("收到消息: source_type={}, node_id={}, tlv_type={}, payload_len={}",
             msg.source_type, msg.node_id, msg.tlv_type, msg.payload.size());
     });
+
+    // HTTP 监控仪表盘（无屏设备通过浏览器查看）
+    HttpDashboard http_dashboard;
+    int http_port = std::stoi(config["http"]["port"].empty() ? "8080" : config["http"]["port"]);
+    if (!http_dashboard.start(http_port, 0x47574D4D)) {
+        logger->warn("HTTP 仪表盘启动失败，不影响主流程");
+    }
 
     // 通知 Watchdog：已就绪
     mkdir("/tmp/gateway_watchdog", 0755);

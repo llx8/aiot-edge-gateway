@@ -8,6 +8,8 @@ add_library(common STATIC
     ModbusRtu.cpp
     DriverLoader.cpp
     GpioDriver.cpp
+    ShmReader.cpp
+    HttpDashboard.cpp
 )
 
 target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

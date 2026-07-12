@@ -4,7 +4,6 @@ set(CMAKE_AUTOMOC ON)
 
 # 源文件列表
 set(SOURCES
-    ShmReader.cpp
     MonitorWindow.cpp
     DashboardWidget.cpp
     SensorChartWidget.cpp
@@ -14,7 +13,6 @@ set(SOURCES
 
 # 头文件列表
 set(HEADERS
-    ShmReader.h
     MonitorWindow.h
     DashboardWidget.h
     SensorChartWidget.h
