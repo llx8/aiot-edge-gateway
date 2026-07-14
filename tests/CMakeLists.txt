@@ -1,5 +1,5 @@
 # 使用系统已安装的 gtest（apt install libgtest-dev）
-find_package(GTest REQUIRED QUIET)
+find_package(GTest QUIET)
 if(NOT GTest_FOUND)
     # 回退：从 /usr/src 源码构建
     message(STATUS "gtest not found via find_package; building from /usr/src...")

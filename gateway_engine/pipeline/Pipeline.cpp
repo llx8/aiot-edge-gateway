@@ -11,13 +11,17 @@ Pipeline::Pipeline(const PipelineConfig& cfg)
 
 Pipeline::~Pipeline() {}
 
-void Pipeline::start() {
+void Pipeline::start(std::string model_path) {
+    if (model_path.empty()) {
+        model_path = cfg_.model_path;
+    }
+    model_path_ = std::move(model_path);
     pool_ = std::make_unique<FramePool>(
         cfg_.frame_pool_size, cfg_.input_size, cfg_.input_size, 3);
 
-    capture_     = std::make_unique<CaptureStage>(cfg_.video_path, pool_.get(), &queue_1_);
+    capture_     = std::make_unique<CaptureStage>(cfg_.video_path, cfg_.input_size, pool_.get(), &queue_1_);
     preprocess_  = std::make_unique<PreprocessStage>(&queue_1_, &queue_2_, cfg_.input_size); 
-    inference_   = std::make_unique<InferenceStage>(&queue_2_, &queue_3_);
+    inference_   = std::make_unique<InferenceStage>(&queue_2_, &queue_3_, model_path_);
     postprocess_ = std::make_unique<PostprocessStage>(&queue_3_, cfg_.conf_threshold, cfg_.iou_threshold, cfg_.input_size);
 
     // 倒序启动

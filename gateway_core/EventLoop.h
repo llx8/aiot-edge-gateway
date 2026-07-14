@@ -22,7 +22,7 @@ public:
     // 停止事件循环
     void stop();
 
-    using DataCallback = std::function<void(const InternalMessage&)>;
+    using DataCallback = std::function<void(int fd, const InternalMessage&)>;
     void set_data_callback(DataCallback cb);
 
     using FdCallback = std::function<void(int fd)>;

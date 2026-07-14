@@ -17,7 +17,7 @@ class Pipeline {
 public:
     explicit Pipeline(const PipelineConfig& cfg);
     ~Pipeline();
-    void start();
+    void start(std::string model_path = "");
     void stop();
     void setCallback(DetectionCallback cb);
     bool switch_model(const std::string& path);
@@ -31,6 +31,7 @@ public:
 private:
     PipelineConfig cfg_;
     std::unique_ptr<FramePool> pool_;
+    std::string model_path_;
     
     // 三条队列
     PipelineQueue<std::shared_ptr<Frame>, 4> queue_1_;  

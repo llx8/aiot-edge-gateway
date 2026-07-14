@@ -2,7 +2,7 @@
 #include <cstring>
 
 namespace gateway_engine {
-// 构造函数，初始化帧池大小
+
 FramePool::FramePool(int pool_size, int width, int height, int channels)
     : pool_size_(pool_size)
     , free_head_(0)
@@ -31,21 +31,26 @@ FramePool::FramePool(int pool_size, int width, int height, int channels)
     free_head_.store(0, std::memory_order_release);
 }
 
-// 获取帧
 std::shared_ptr<Frame> FramePool::get_frame() {
     int idx;
     do {
-        idx = free_head_.load();
+        idx = free_head_.load(std::memory_order_acquire);
         if (idx == -1) return nullptr;
-    }while (!free_head_.compare_exchange_strong(idx, free_list_[idx]));
+    } while (!free_head_.compare_exchange_weak(idx, free_list_[idx],
+             std::memory_order_release, std::memory_order_relaxed));
 
     return std::shared_ptr<Frame>(&frames_[idx], [this, idx](Frame*) {
         release(idx);
     });
 }
 
-// 归还帧
 void FramePool::release(int index) {
-    free_list_[index] = free_head_.exchange(index);
+    int old;
+    do {
+        old = free_head_.load(std::memory_order_acquire);
+        free_list_[index] = old;
+    } while (!free_head_.compare_exchange_weak(old, index,
+             std::memory_order_release, std::memory_order_relaxed));
 }
+
 }

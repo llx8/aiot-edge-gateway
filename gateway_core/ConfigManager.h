@@ -3,7 +3,6 @@
 #include <string>
 #include <functional>
 #include <vector>
-#include <memory>
 
 // 配置热加载管理器
 // 职责：MQTT RPC 收到 config_update → 校验/备份/原子写入/模块通知/ACK

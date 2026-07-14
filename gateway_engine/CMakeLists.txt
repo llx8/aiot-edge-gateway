@@ -24,3 +24,6 @@ target_link_libraries(gateway_engine_lib PUBLIC common gateway_access_lib ${GSTR
 
 add_executable(gateway_engine main.cpp)
 target_link_libraries(gateway_engine PRIVATE gateway_engine_lib)
+
+# 链接 RKNN 库
+target_link_libraries(gateway_engine_lib PUBLIC rknnrt)

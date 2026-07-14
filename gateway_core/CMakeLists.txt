@@ -13,6 +13,7 @@ add_library(gateway_core_lib STATIC
     EventFusion.cpp
     EngineManager.cpp
     ConfigManager.cpp
+    OtaManager.cpp
 )
 
 target_include_directories(gateway_core_lib PUBLIC
@@ -20,7 +21,7 @@ target_include_directories(gateway_core_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../common
 )
 
-target_link_libraries(gateway_core_lib PUBLIC common SQLite::SQLite3 eclipse-paho-mqtt-c::paho-mqtt3a paho-mqttpp3)
+target_link_libraries(gateway_core_lib PUBLIC common SQLite::SQLite3 eclipse-paho-mqtt-c::paho-mqtt3a paho-mqttpp3 curl)
 
 # 可执行文件（thin wrapper） — main.cpp 第4步才写
 add_executable(gateway_core main.cpp)

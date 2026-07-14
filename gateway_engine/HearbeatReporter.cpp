@@ -1,19 +1,46 @@
 #include "HearbeatReporter.h"
 #include "InternalMessage.h" 
+#include <fstream>
+#include <string>
 
-// 构造函数
 HeartbeatReporter::HeartbeatReporter(gateway_engine::Pipeline& pipeline, UdsClient& client) 
     : pipeline_(pipeline)
     , client_(client) {}
 
+static float read_npu_temp() {
+    static const char* kPaths[] = {
+        "/sys/class/npu/npu_temp",
+        "/sys/devices/platform/fead0000.npu/thermal/npu_temp",
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+        "/sys/class/thermal/thermal_zone2/temp",
+    };
+
+    for (const char* path : kPaths) {
+        std::ifstream f(path);
+        if (!f.is_open()) continue;
+        std::string val;
+        std::getline(f, val);
+        if (val.empty()) continue;
+        try {
+            float temp = std::stof(val);
+            if (temp > 1000.0f) temp /= 1000.0f;
+            return temp;
+        } catch (...) {
+            continue;
+        }
+    }
+    return -1.0f;
+}
+
 void HeartbeatReporter::send_heartbeat() {
-    float fps = pipeline_.fps();         // 拿帧率
-    float npu_temp = 45.0f;              // PC 上 mock 固定值
+    float fps = pipeline_.fps();
+    float npu_temp = read_npu_temp();
 
     InternalMessage msg;
-    msg.source_type = 3;                 // AI Detection
-    msg.tlv_type = 0x05;                 // AI 心跳
-    msg.payload.resize(8);               // 4B fps + 4B npu_temp
+    msg.source_type = 3;
+    msg.tlv_type = 0x05;
+    msg.payload.resize(8);
     memcpy(msg.payload.data(), &fps, 4);
     memcpy(msg.payload.data() + 4, &npu_temp, 4);
 

@@ -209,7 +209,7 @@ bool EventLoop::start() {
                 auto messages = handle_client_data(fd);
                 for (const auto& msg : messages) {
                     if (data_callback_) {
-                        data_callback_(msg);
+                        data_callback_(fd, msg);
                     }
                 }
             }
