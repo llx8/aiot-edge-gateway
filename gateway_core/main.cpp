@@ -6,6 +6,7 @@
 #include "Logger.h"
 #include "ShmLayout.h"
 #include <csignal>
+#include <sys/signalfd.h>
 #include "MqttClient.h"
 #include <mqtt/message.h>
 #include "OfflineStore.h"
@@ -24,12 +25,6 @@
 #include <sstream>
 
 EventLoop* g_event_loop = nullptr;
-
-void signal_handler(int signum) {
-    if (g_event_loop) {
-        g_event_loop->stop();
-    }
-}
 
 static bool send_uds_cmd(int fd, int32_t node_id, uint8_t tlv_type, const std::string& payload_str) {
     if (fd < 0) return false;
@@ -55,9 +50,6 @@ static std::string extract_json_str(const std::string& json, const std::string& 
 int main(){
     auto logger = GetLogger("gateway_core");
     logger->info("Starting gateway core...");
-
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
 
     auto config = load_config("conf/gateway.conf");
     std::string uds_path = config["uds"]["data_path"];
@@ -99,9 +91,48 @@ int main(){
         logger->warn("高湿度告警! node={}", msg.node_id);
     });
 
+    // 传感器离线检测：当同节点上次心跳距今超过 30s 时触发
+    std::unordered_map<int32_t, time_t> node_last_seen;
+    rule_engine.add_rule([&](const InternalMessage& msg) -> bool {
+        time_t now = time(nullptr);
+        auto it = node_last_seen.find(msg.node_id);
+        bool offline = false;
+        if (it != node_last_seen.end()) {
+            offline = (now - it->second) > 30;  // 先用旧值判断是否离线
+        }
+        node_last_seen[msg.node_id] = now;  // 再更新最后心跳时间
+        return offline;
+    },
+    [&](const InternalMessage& msg){
+        logger->warn("传感器离线告警: node={}", msg.node_id);
+    });
+
     EventLoop event_loop({uds_path, engine_path});
     event_loop.set_monitor_path(monitor_path);
     g_event_loop = &event_loop;
+
+    // 使用 signalfd 替代传统 signal()，纳入 epoll 统一管理
+    // 必须在 event_loop 构造之后、子线程（DB/MQTT）启动之前注册
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    sigprocmask(SIG_BLOCK, &mask, nullptr);
+    int sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    if (sig_fd >= 0) {
+        event_loop.add_external_fd(sig_fd, [&](int fd) {
+            struct signalfd_siginfo siginfo;
+            ssize_t n = read(fd, &siginfo, sizeof(siginfo));
+            if (n == sizeof(siginfo)) {
+                logger->info("收到信号 {}, 优雅退出", siginfo.ssi_signo);
+                event_loop.stop();
+            }
+        });
+    } else {
+        // 回退到传统 signal（兼容旧内核）
+        signal(SIGINT, [](int){ if (g_event_loop) g_event_loop->stop(); });
+        signal(SIGTERM, [](int){ if (g_event_loop) g_event_loop->stop(); });
+    }
 
     DbWriter db_writer(db_path);
     db_writer.start();
@@ -109,7 +140,8 @@ int main(){
     OfflineStore offline_store(db_path);
     bool need_flush = false;
 
-    MqttClient mqtt(config["mqtt"]["broker_url"], config["mqtt"]["client_id"], config["mqtt"]["will_topic"]);
+    MqttClient mqtt(config["mqtt"]["broker_url"], config["mqtt"]["client_id"],
+                "spBv1.0/edge_gateway/DBIRTH/gw001");
 
     ConfigManager config_manager("conf/gateway.hot.json");
 
@@ -124,7 +156,7 @@ int main(){
 
     config_manager.load_persisted();
 
-    OtaManager ota_manager("model", db_path);
+    OtaManager ota_manager("models", db_path);
 
     RpcHandler rpc_handler;
 
@@ -143,8 +175,16 @@ int main(){
         try {
             std::string t = extract_json_str(payload, "temp_max");
             std::string h = extract_json_str(payload, "hum_max");
-            if (!t.empty()) temp_max.store(std::stof(t));
-            if (!h.empty()) hum_max.store(std::stof(h));
+            if (!t.empty()) {
+                float v = std::stof(t);
+                if (v < -50.0f || v > 150.0f) return "NACK: temp_max 超出范围 [-50, 150]";
+                temp_max.store(v);
+            }
+            if (!h.empty()) {
+                float v = std::stof(h);
+                if (v < 0.0f || v > 100.0f) return "NACK: hum_max 超出范围 [0, 100]";
+                hum_max.store(v);
+            }
             return "ACK";
         } catch (...) {
             return "NACK: invalid params";
@@ -152,6 +192,14 @@ int main(){
     });
 
     rpc_handler.register_method("set_modbus_interval", [&](const std::string& payload){
+        try {
+            std::string interval_str = extract_json_str(payload, "interval_ms");
+            if (!interval_str.empty()) {
+                int interval = std::stoi(interval_str);
+                if (interval < 100 || interval > 60000)
+                    return "NACK: interval_ms 超出范围 [100, 60000]";
+            }
+        } catch (...) { return "NACK: invalid interval_ms"; }
         if (!send_uds_cmd(access_cmd_fd, 0, 0x20, payload)) {
             return "NACK: access not connected";
         }
@@ -166,14 +214,28 @@ int main(){
     });
 
     rpc_handler.register_method("start_analysis", [&](const std::string& payload){
-        if (!send_uds_cmd(engine_cmd_fd, 0, 0x10, payload)) {
+        // MQTT params 是 JSON；引擎按 design:207 的 "camera=X model=Y" 格式解析
+        std::string camera = extract_json_str(payload, "camera");
+        std::string model = extract_json_str(payload, "model");
+        // 裸模型名补全为 models/ 路径（引擎按路径加载，与 OTA 一致）
+        if (!model.empty() && model.find('/') == std::string::npos) {
+            model = "models/" + model;
+        }
+        std::string uds_payload;
+        if (!camera.empty()) uds_payload += "camera=" + camera + " ";
+        if (!model.empty())  uds_payload += "model=" + model;
+        // 两者都为空时引擎用默认模型
+        if (!send_uds_cmd(engine_cmd_fd, 0, 0x10, uds_payload)) {
             return "NACK: engine not connected";
         }
         return "ACK";
     });
 
     rpc_handler.register_method("stop_analysis", [&](const std::string& payload){
-        if (!send_uds_cmd(engine_cmd_fd, 0, 0x11, payload)) {
+        // design:211: "STOP_ANALYSIS camera=zone_A"
+        std::string camera = extract_json_str(payload, "camera");
+        std::string uds_payload = camera.empty() ? std::string() : ("camera=" + camera);
+        if (!send_uds_cmd(engine_cmd_fd, 0, 0x11, uds_payload)) {
             return "NACK: engine not connected";
         }
         return "ACK";
@@ -182,6 +244,10 @@ int main(){
     rpc_handler.register_method("switch_model", [&](const std::string& payload){
         std::string model = extract_json_str(payload, "model");
         if (model.empty()) return "NACK: missing model name";
+        // 裸模型名补全为 models/ 路径（引擎按路径加载）
+        if (model.find('/') == std::string::npos) {
+            model = "models/" + model;
+        }
         if (!send_uds_cmd(engine_cmd_fd, 0, 0x12, model)) {
             return "NACK: engine not connected";
         }
@@ -247,6 +313,13 @@ int main(){
 
     ota_manager.set_command_sender([&](int32_t node_id, uint8_t cmd, const std::string& path) {
         return send_uds_cmd(engine_cmd_fd, node_id, cmd, path);
+    });
+
+    ota_manager.set_status_reporter([&](const std::string& status) {
+        logger->warn("OTA 告警: {}", status);
+        if (mqtt.is_connected()) {
+            mqtt.publish("spBv1.0/edge_gateway/DALARM/gw001", status);
+        }
     });
 
     int rule_periodic_counter = 0;
@@ -320,6 +393,15 @@ int main(){
                 auto timed_out = engine_manager.check_timeout();
                 for (auto node_id : timed_out) {
                     logger->warn("进程 E 心跳超时: node={}", node_id);
+                }
+                // 同步 AI 指标到共享内存
+                if (msg.payload.size() >= 8) {
+                    ShmBlock ai_block{};
+                    ai_block.total_packets = total_packets;
+                    ai_block.ai_engine_online = 1;
+                    std::memcpy(&ai_block.inference_fps, msg.payload.data(), 4);
+                    std::memcpy(&ai_block.npu_temp_c, msg.payload.data() + 4, 4);
+                    shm_publisher.publish(ai_block);
                 }
             } else if (msg.tlv_type == 0x07) {
                 // JPEG 快照：直接转发给 monitor 进程

@@ -1,5 +1,6 @@
 #include "InferenceStage.h"
 #include "Logger.h"
+#include "Sha256.h"
 #include <chrono>
 #include <thread>
 #include <cstring>
@@ -109,7 +110,24 @@ void InferenceStage::destroy_rknn() {
     }
 }
 
-bool InferenceStage::switch_model(const std::string& model_path) {
+bool InferenceStage::switch_model(const std::string& model_path, const std::string& expected_sha256) {
+    std::lock_guard<std::mutex> lock(model_mutex_);  // 热切换期间阻塞推理线程
+
+    // 校验模型文件 SHA256（如果提供了期望值）
+    if (!expected_sha256.empty()) {
+        std::string actual_sha256 = sha256_file(model_path);
+        if (actual_sha256.empty()) {
+            GetLogger("InferenceStage")->error("模型文件不存在或无法读取: {}", model_path);
+            return false;
+        }
+        if (actual_sha256 != expected_sha256) {
+            GetLogger("InferenceStage")->error("SHA256 校验失败: expected={}, actual={}",
+                expected_sha256, actual_sha256);
+            return false;
+        }
+        GetLogger("InferenceStage")->info("SHA256 校验通过: {}", actual_sha256);
+    }
+
     // 保存旧模型信息，用于失败回滚
     auto old_ctx = ctx_;
     auto old_input_buf = std::move(input_buf_);
@@ -161,6 +179,9 @@ bool InferenceStage::switch_model(const std::string& model_path) {
 
     // 旧模型也无效（极端情况），上报 FATAL
     GetLogger("InferenceStage")->error("FATAL: 旧模型回滚失败，模型文件可能已损坏");
+    if (fatal_cb_) {
+        fatal_cb_("MODEL_ROLLBACK_FATAL: 新旧模型均加载失败");
+    }
     return false;
 }
 
@@ -188,6 +209,10 @@ void InferenceStage::run() {
         if (!frame || !frame->preprocessed_data) {
             continue;
         }
+
+        // 加锁保护 ctx_ 访问，防止与 switch_model() 并发
+        std::lock_guard<std::mutex> lock(model_mutex_);
+        if (ctx_ == 0) continue;  // 模型未加载，跳过
 
         // 设置 RKNN 输入
         memset(inputs, 0, sizeof(inputs));

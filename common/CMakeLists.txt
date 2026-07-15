@@ -10,6 +10,7 @@ add_library(common STATIC
     GpioDriver.cpp
     ShmReader.cpp
     HttpDashboard.cpp
+    Sha256.cpp
 )
 
 target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

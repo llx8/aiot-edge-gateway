@@ -110,7 +110,7 @@ void ModbusTcpDriver::poll_loop() {
         ModbusResponse resp;
         if (decode_tcp_response(buf, n, resp)) {
             InternalMessage msg;
-            msg.source_type = 1;
+            msg.source_type = 0;  // 0 = Modbus
             msg.node_id = slave_addr_;
             msg.tlv_type = 0x01;
             if (resp.registers.size() > 0) {

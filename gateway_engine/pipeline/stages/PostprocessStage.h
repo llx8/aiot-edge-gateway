@@ -5,6 +5,7 @@
 #include "../types.h"
 #include "InferenceStage.h"
 #include <vector>
+#include <functional>
 
 namespace gateway_engine {
 
@@ -18,6 +19,7 @@ public:
         int jpeg_quality = 75);
 
     void setCallback(DetectionCallback cb);
+    void setOnFrameDone(std::function<void()> cb) { on_frame_done_ = std::move(cb); }
 protected:
     void run() override;
 private:
@@ -27,6 +29,7 @@ private:
     int input_size_;
     int jpeg_quality_;
     DetectionCallback callback_;
+    std::function<void()> on_frame_done_;
 
     // JPEG 编码：从 Frame 原始数据生成 JPEG
     std::vector<uint8_t> encode_jpeg(const InferenceResult& result);

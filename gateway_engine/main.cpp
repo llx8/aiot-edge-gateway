@@ -9,7 +9,7 @@
 #include <fstream>
 #include <sys/stat.h>
 #include "AnalysisScheduler.h"
-#include "HearbeatReporter.h"
+#include "HeartbeatReporter.h"
 
 static volatile sig_atomic_t g_running = 1;
 void signal_handler(int) { g_running = 0; }
@@ -24,6 +24,14 @@ int main() {
     mkdir("/tmp/gateway_watchdog", 0755);
     std::ofstream("/tmp/gateway_watchdog/gateway_engine.ready") << "1";
 
+    // 写 PID 文件，供 setup_cgroups.sh 自动附加
+    std::ofstream pid_file("/tmp/gateway_engine.pid");
+    pid_file << getpid();
+    pid_file.close();
+
+    // 确保模型目录存在
+    mkdir("models", 0755);
+
     auto config = load_config("conf/gateway.conf");
     std::string uds_path = config["uds"]["engine_path"];
     UdsClient uds_client(uds_path, 3);
@@ -34,9 +42,19 @@ int main() {
 
     gateway_engine::PipelineConfig pipe_cfg;
     pipe_cfg.video_path = "../video/video.mp4";
-    pipe_cfg.model_path = "../model/rknn_model.rknn";
+    pipe_cfg.model_path = "models/yolov8n.rknn";
 
     gateway_engine::Pipeline pipeline(pipe_cfg);
+    pipeline.setFatalCallback([&](const std::string& reason) {
+        logger->error("FATAL: {}", reason);
+        InternalMessage fatal_msg;
+        fatal_msg.source_type = 3;
+        fatal_msg.tlv_type = TLV_FATAL;
+        fatal_msg.payload.assign(reason.begin(), reason.end());
+        auto encoded = encode_internal_msg(fatal_msg);
+        uds_client.write(encoded.data(), encoded.size());
+    });
+
     pipeline.setCallback([&](const std::vector<gateway_engine::Detection>& dets,
                               const std::vector<uint8_t>& jpeg_data) {
         logger->info("Detected {} objects, jpeg={}KB", dets.size(), jpeg_data.size() / 1024);
@@ -53,12 +71,21 @@ int main() {
             uds_client.write(encoded.data(), encoded.size());
         }
 
-        // 发送 JPEG 快照（tlv_type=0x07）
+        // 发送 JPEG 快照（tlv_type=0x07），payload 格式：
+        // [4B: num_detections] + [num_detections * 24B: Detection] + [JPEG data]
         if (!jpeg_data.empty()) {
             InternalMessage jpeg_msg;
             jpeg_msg.source_type = 3;
             jpeg_msg.tlv_type = 0x07;
-            jpeg_msg.payload = jpeg_data;
+            int32_t num = static_cast<int32_t>(dets.size());
+            jpeg_msg.payload.resize(4 + num * sizeof(gateway_engine::Detection) + jpeg_data.size());
+            std::memcpy(jpeg_msg.payload.data(), &num, 4);
+            if (num > 0) {
+                std::memcpy(jpeg_msg.payload.data() + 4, dets.data(),
+                    num * sizeof(gateway_engine::Detection));
+            }
+            std::memcpy(jpeg_msg.payload.data() + 4 + num * sizeof(gateway_engine::Detection),
+                jpeg_data.data(), jpeg_data.size());
 
             auto encoded = encode_internal_msg(jpeg_msg);
             ssize_t written = uds_client.write(encoded.data(), encoded.size());
@@ -72,13 +99,13 @@ int main() {
     scheduler.start();
 
     // 主循环心跳
-    HeartbeatReporter hearbeat(pipeline, uds_client);
+    HeartbeatReporter heartbeat(pipeline, uds_client);
     static constexpr float kNpuThrottleTempC = 85.0f;
     while (g_running) {
-        hearbeat.send_heartbeat();
+        heartbeat.send_heartbeat();
 
         // NPU 过热保护：> 85°C 自动降帧率
-        float npu_temp = hearbeat.last_npu_temp();
+        float npu_temp = heartbeat.last_npu_temp();
         if (npu_temp > kNpuThrottleTempC) {
             pipeline.set_throttle(true);
             logger->warn("NPU 过热保护已触发: temp={:.1f}°C, 降帧率", npu_temp);

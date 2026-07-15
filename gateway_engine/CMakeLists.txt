@@ -6,7 +6,7 @@ add_library(gateway_engine_lib STATIC
     pipeline/stages/PostprocessStage.cpp   
     pipeline/Pipeline.cpp
     AnalysisScheduler.cpp
-    HearbeatReporter.cpp
+    HeartbeatReporter.cpp
 )
 
 target_include_directories(gateway_engine_lib PUBLIC

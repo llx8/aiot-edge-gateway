@@ -25,6 +25,7 @@ void Pipeline::start(std::string model_path) {
     preprocess_  = std::make_unique<PreprocessStage>(&queue_1_, &queue_2_, cfg_.input_size); 
     inference_   = std::make_unique<InferenceStage>(&queue_2_, &queue_3_, model_path_);
     postprocess_ = std::make_unique<PostprocessStage>(&queue_3_, cfg_.conf_threshold, cfg_.iou_threshold, cfg_.input_size, cfg_.jpeg_quality);
+    postprocess_->setOnFrameDone([this]{ on_frame_done(); });
 
     // 倒序启动
     postprocess_->start();
@@ -34,14 +35,18 @@ void Pipeline::start(std::string model_path) {
 }
 
 void Pipeline::stop() {
-    capture_->stop();       // 正序停止
-    preprocess_->stop();
-    inference_->stop();
-    postprocess_->stop();
+    if (capture_)     capture_->stop();      // 正序停止
+    if (preprocess_)  preprocess_->stop();
+    if (inference_)   inference_->stop();
+    if (postprocess_) postprocess_->stop();
 }
 
 void Pipeline::setCallback(DetectionCallback cb) {
     if (postprocess_) postprocess_->setCallback(std::move(cb));
+}
+
+void Pipeline::setFatalCallback(std::function<void(const std::string&)> cb) {
+    if (inference_) inference_->set_fatal_callback(std::move(cb));
 }
 
 void Pipeline::on_frame_done() {
@@ -63,9 +68,9 @@ float Pipeline::fps() const {
     return current_fps_.load();
 }
 
-bool Pipeline::switch_model(const std::string& path) {
+bool Pipeline::switch_model(const std::string& path, const std::string& expected_sha256) {
     // 通知推理阶段切换模型
-    return inference_->switch_model(path);
+    return inference_->switch_model(path, expected_sha256);
 }
 
 float Pipeline::avg_latency_ms() const {

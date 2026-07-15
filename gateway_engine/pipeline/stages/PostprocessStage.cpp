@@ -175,6 +175,10 @@ void PostprocessStage::run() {
         if (callback_) {
             callback_(detections, jpeg_data);
         }
+
+        if (on_frame_done_) {
+            on_frame_done_();
+        }
     }
 }
 

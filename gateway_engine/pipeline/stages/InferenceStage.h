@@ -4,6 +4,7 @@
 #include "../PipelineQueue.h"
 #include "../types.h"
 #include <memory>
+#include <mutex>
 #include <rknn/rknn_api.h>
 #include <vector>
 #include <string>
@@ -24,8 +25,11 @@ public:
         const std::string& model_path);
     ~InferenceStage() override;
 
-    // 热切换模型
-    bool switch_model(const std::string& model_path);
+    // 热切换模型（可选传 SHA256 校验）
+    bool switch_model(const std::string& model_path, const std::string& expected_sha256 = "");
+
+    // 设置 FATAL 回调（旧模型回滚失败时触发）
+    void set_fatal_callback(std::function<void(const std::string&)> cb) { fatal_cb_ = std::move(cb); }
 
 protected:
     void run() override;
@@ -46,6 +50,9 @@ private:
     // 推理输入缓冲区（复用，避免反复分配）
     std::vector<uint8_t> input_buf_;
     int input_size_ = 0;          // 网络输入尺寸（如 640）
+
+    mutable std::mutex model_mutex_;  // 保护 ctx_ 等热切换相关成员
+    std::function<void(const std::string&)> fatal_cb_;  // FATAL 回调
 };
 
 } // namespace gateway_engine

@@ -14,7 +14,7 @@ std::optional<InternalMessage> EventFusion::evaluate(const InternalMessage& msg)
         if (msg.payload.size() >= sizeof(float)) {
             float value;
             std::memcpy(&value, msg.payload.data(), sizeof(float));
-            sensor_cache_[msg.node_id] = value;
+            sensor_cache_[msg.node_id] = {value, std::chrono::steady_clock::now()};
         }
         return std::nullopt;
     }
@@ -63,7 +63,15 @@ std::optional<InternalMessage> EventFusion::evaluate(const InternalMessage& msg)
                     if (!rule.sensor_condition) continue;
                     if (!rule.sensor_condition(0.0f)) continue;
                 } else {
-                    if (!rule.sensor_condition(it->second)) continue;
+                    // 检查传感器数据是否在时间窗口内（30s TTL）
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now() - it->second.timestamp).count();
+                    if (elapsed > SENSOR_CACHE_TTL_SEC) {
+                        // 过期数据，跳过此传感器条件
+                        if (!rule.sensor_condition(0.0f)) continue;
+                    } else {
+                        if (!rule.sensor_condition(it->second.value)) continue;
+                    }
                 }
 
                 if (rule.output_severity > max_severity)

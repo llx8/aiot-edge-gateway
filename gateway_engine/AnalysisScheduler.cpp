@@ -34,12 +34,31 @@ void AnalysisScheduler::run() {
 
         // 3. 判断是什么指令
         if (result.msg.tlv_type == CMD_START_ANALYSIS) {
-            pipeline_.start();
+            // 解析 payload 中的 camera/model 参数
+            std::string payload_str(result.msg.payload.begin(), result.msg.payload.end());
+            std::string model_path;
+            // 简单解析: "camera=zone_A model=yolov8n.rknn"
+            auto model_pos = payload_str.find("model=");
+            if (model_pos != std::string::npos) {
+                model_path = payload_str.substr(model_pos + 6);
+                auto space = model_path.find(' ');
+                if (space != std::string::npos) model_path = model_path.substr(0, space);
+            }
+            pipeline_.start(model_path);
         } else if (result.msg.tlv_type == CMD_STOP_ANALYSIS) {
             pipeline_.stop();
         } else if (result.msg.tlv_type ==  CMD_SWITCH_MODEL) {
-            std::string model_path(result.msg.payload.begin(), result.msg.payload.end());
-            bool ok = pipeline_.switch_model(model_path);
+            // payload 格式: "model_path|sha256"
+            // OTA 下发带 sha256（校验完整性）；RPC 手动切换无 sha256（跳过校验）
+            std::string payload_str(result.msg.payload.begin(), result.msg.payload.end());
+            std::string model_path = payload_str;
+            std::string expected_sha256;
+            auto sep = payload_str.find('|');
+            if (sep != std::string::npos) {
+                model_path = payload_str.substr(0, sep);
+                expected_sha256 = payload_str.substr(sep + 1);
+            }
+            bool ok = pipeline_.switch_model(model_path, expected_sha256);
 
             // 回复 ACK / NACK
             InternalMessage reply;

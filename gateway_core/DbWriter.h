@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <sqlite3.h>
 #include <vector>
+#include <sys/eventfd.h>
 
 static constexpr int kDbQueueSize = 4096;
 static constexpr int kBatchSize = 50;
@@ -45,6 +46,7 @@ private:
     std::atomic<bool> running_{false};
 
     sqlite3* db_{nullptr};
+    int notify_fd_{-1};  // eventfd：满 50 条时唤醒 DB 线程
     void open_db(const std::string& db_path);
     // 创建数据库表
     void create_tables();  // 创建数据库表

@@ -27,14 +27,15 @@ std::string CaptureStage::make_pipeline_str() const {
         return "rtspsrc location=" + video_path_ +
                " latency=0 protocols=tcp"
                " ! rtph264depay ! h264parse"
-               " ! avdec_h264"
+               " ! mppvideodec"
                " ! videoconvert"
                " ! video/x-raw,format=BGR,width=" + std::to_string(input_size_) +
                ",height=" + std::to_string(input_size_) +
                " ! appsink name=appsink";
     } else {
         return "filesrc location=" + video_path_ +
-               " ! decodebin"
+               " ! qtdemux ! h264parse"
+               " ! mppvideodec"
                " ! videoconvert"
                " ! video/x-raw,format=BGR,width=" + std::to_string(input_size_) +
                ",height=" + std::to_string(input_size_) +

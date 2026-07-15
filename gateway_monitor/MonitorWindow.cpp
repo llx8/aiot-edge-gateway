@@ -128,13 +128,39 @@ void MonitorWindow::onUdsData() {
 
     // JPEG 快照 (tlv_type=0x07)
     if (result.msg.tlv_type == 0x07 && !result.msg.payload.empty()) {
-        // 从 payload 中提取检测框信息（如果有）
+        // payload 格式: [4B: num_detections] + [num * 24B: Detection] + [JPEG data]
         std::vector<QRect> boxes;
         std::vector<QString> labels;
 
-        // payload 是纯 JPEG 数据，直接传给 AiSnapshotWidget
-        ai_snapshot_->update_snapshot(result.msg.payload, boxes, labels);
-        GetLogger("MonitorWindow")->info("Received JPEG snapshot: {}KB",
-            result.msg.payload.size() / 1024);
+        const auto& payload = result.msg.payload;
+        if (payload.size() >= 4) {
+            int32_t num_dets = 0;
+            std::memcpy(&num_dets, payload.data(), 4);
+            constexpr size_t DET_SIZE = 24;  // sizeof(Detection) = 4 floats + 1 float + 1 int
+            if (num_dets > 0 && payload.size() >= 4 + num_dets * DET_SIZE) {
+                for (int32_t i = 0; i < num_dets; ++i) {
+                    size_t off = 4 + i * DET_SIZE;
+                    float x, y, w, h, conf;
+                    int32_t class_id;
+                    std::memcpy(&x, payload.data() + off, 4);
+                    std::memcpy(&y, payload.data() + off + 4, 4);
+                    std::memcpy(&w, payload.data() + off + 8, 4);
+                    std::memcpy(&h, payload.data() + off + 12, 4);
+                    std::memcpy(&conf, payload.data() + off + 16, 4);
+                    std::memcpy(&class_id, payload.data() + off + 20, 4);
+                    boxes.push_back(QRect(static_cast<int>(x), static_cast<int>(y),
+                                          static_cast<int>(w), static_cast<int>(h)));
+                    labels.push_back(QString("cls%1 %2%").arg(class_id).arg(conf * 100, 0, 'f', 0));
+                }
+            }
+            // 提取 JPEG 部分
+            size_t jpeg_off = 4 + num_dets * DET_SIZE;
+            if (jpeg_off < payload.size()) {
+                std::vector<uint8_t> jpeg_data(payload.begin() + jpeg_off, payload.end());
+                ai_snapshot_->update_snapshot(jpeg_data, boxes, labels);
+                GetLogger("MonitorWindow")->info("Received JPEG snapshot: {}KB, {} detections",
+                    jpeg_data.size() / 1024, num_dets);
+            }
+        }
     }
 }

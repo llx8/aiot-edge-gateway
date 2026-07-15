@@ -1,6 +1,7 @@
 #include "OtaManager.h"
 #include "Logger.h"
 #include "InternalMessage.h"
+#include "Sha256.h"
 #include <fstream>
 #include <curl/curl.h>
 #include <cstring>
@@ -82,37 +83,21 @@ bool OtaManager::download_model(const std::string& url, const std::string& dest_
 }
 
 bool OtaManager::verify_sha256(const std::string& file_path, const std::string& expected_hash) {
-    std::string cmd = "sha256sum " + file_path;
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return false;
-
-    char buf[128];
-    std::string output;
-    if (fgets(buf, sizeof(buf), pipe)) {
-        output = buf;
-    }
-    pclose(pipe);
-
-    size_t space = output.find(' ');
-    if (space == std::string::npos) return false;
-
-    std::string actual_hash = output.substr(0, space);
+    std::string actual_hash = sha256_file(file_path);
+    if (actual_hash.empty()) return false;
     return actual_hash == expected_hash;
 }
 
-bool OtaManager::notify_engine_switch(const std::string& model_path) {
+bool OtaManager::notify_engine_switch(const std::string& model_path, const std::string& sha256) {
     if (!command_sender_) return false;
 
-    InternalMessage msg;
-    msg.source_type = 3;
-    msg.node_id = 0;
-    msg.tlv_type = 0x0A;
-    msg.payload.assign(model_path.begin(), model_path.end());
-
-    return command_sender_(0, 0x0A, std::string(msg.payload.begin(), msg.payload.end()));
+    // payload 格式: "model_path|sha256"
+    // 引擎收到 CMD_SWITCH_MODEL 后解析，用 sha256 校验模型完整性再热切换
+    std::string payload = model_path + "|" + sha256;
+    return command_sender_(0, CMD_SWITCH_MODEL, payload);
 }
 
-void OtaManager::save_version(const std::string& model_name, const std::string& version, const std::string& md5) {
+void OtaManager::save_version(const std::string& model_name, const std::string& version, const std::string& sha256) {
     std::string version_path = model_dir_ + "/model_version.json";
     std::ofstream f(version_path);
     if (!f.is_open()) return;
@@ -120,7 +105,7 @@ void OtaManager::save_version(const std::string& model_name, const std::string& 
     f << "{\n";
     f << "  \"current_model\": \"" << model_name << "\",\n";
     f << "  \"version\": \"" << version << "\",\n";
-    f << "  \"md5\": \"" << md5 << "\"\n";
+    f << "  \"sha256\": \"" << sha256 << "\"\n";
     f << "}\n";
 }
 
@@ -128,12 +113,12 @@ std::string OtaManager::handle_ota_update(const std::string& payload) {
     auto logger = GetLogger("OtaManager");
 
     auto url_pos = payload.find("\"url\"");
-    auto md5_pos = payload.find("\"md5\"");
+    auto sha256_pos = payload.find("\"sha256\"");
     auto name_pos = payload.find("\"model_name\"");
     auto ver_pos = payload.find("\"version\"");
 
-    if (url_pos == std::string::npos || md5_pos == std::string::npos) {
-        return "NACK: missing url or md5";
+    if (url_pos == std::string::npos || sha256_pos == std::string::npos) {
+        return "NACK: missing url or sha256";
     }
 
     auto extract_str = [&](size_t pos) -> std::string {
@@ -144,11 +129,11 @@ std::string OtaManager::handle_ota_update(const std::string& payload) {
     };
 
     std::string url = extract_str(url_pos);
-    std::string expected_md5 = extract_str(md5_pos);
+    std::string expected_sha256 = extract_str(sha256_pos);
     std::string model_name = name_pos != std::string::npos ? extract_str(name_pos) : "model.rknn";
     std::string version = ver_pos != std::string::npos ? extract_str(ver_pos) : "1.0";
 
-    if (url.empty() || expected_md5.empty()) {
+    if (url.empty() || expected_sha256.empty()) {
         return "NACK: invalid params";
     }
 
@@ -160,7 +145,7 @@ std::string OtaManager::handle_ota_update(const std::string& payload) {
         return "NACK: download failed";
     }
 
-    if (!verify_sha256(dest_path, expected_md5)) {
+    if (!verify_sha256(dest_path, expected_sha256)) {
         logger->error("OTA: SHA256 mismatch, removing {}", dest_path);
         std::remove(dest_path.c_str());
         return "NACK: SHA256 verification failed";
@@ -168,11 +153,11 @@ std::string OtaManager::handle_ota_update(const std::string& payload) {
 
     logger->info("OTA: SHA256 verified, notifying engine to switch");
 
-    if (!notify_engine_switch(dest_path)) {
+    if (!notify_engine_switch(dest_path, expected_sha256)) {
         return "NACK: failed to notify engine";
     }
 
-    save_version(model_name, version, expected_md5);
+    save_version(model_name, version, expected_sha256);
 
     if (status_reporter_) {
         status_reporter_("OTA: model updated to " + model_name);

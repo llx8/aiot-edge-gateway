@@ -20,7 +20,8 @@ public:
     void start(std::string model_path = "");
     void stop();
     void setCallback(DetectionCallback cb);
-    bool switch_model(const std::string& path);
+    void setFatalCallback(std::function<void(const std::string&)> cb);
+    bool switch_model(const std::string& path, const std::string& expected_sha256 = "");
 
     float fps() const;
     void on_frame_done(); // 每帧处理完成时调用

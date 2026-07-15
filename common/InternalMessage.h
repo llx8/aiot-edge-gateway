@@ -10,6 +10,9 @@ constexpr uint8_t CMD_SWITCH_MODEL    = 0x12;
 constexpr uint8_t CMD_MODEL_ACK       = 0x13;
 constexpr uint8_t CMD_MODEL_NACK      = 0x14;
 
+constexpr uint8_t TLV_JPEG_SNAPSHOT = 0x07;  // JPEG 快照
+constexpr uint8_t TLV_FATAL         = 0xFE;  // FATAL 错误上报（0xFF 保留给设备心跳）
+
 // 内部消息
 struct InternalMessage {
     int32_t source_type; // 0 = Modbus, 1 = GPIO, 2 = I2C, 3 = AI_DETECTION

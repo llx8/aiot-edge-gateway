@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <chrono>
 
 struct FusionRule {
     int ai_class_id;
@@ -24,6 +25,11 @@ public:
     bool load_rules_from_json(const std::string& path);
 
 private:
-    std::unordered_map<int32_t, float> sensor_cache_;
+    struct SensorCacheEntry {
+        float value;
+        std::chrono::steady_clock::time_point timestamp;
+    };
+    std::unordered_map<int32_t, SensorCacheEntry> sensor_cache_;
+    static constexpr int SENSOR_CACHE_TTL_SEC = 30;  // 传感器数据 30s 窗口
     std::vector<FusionRule> rules_;
 };

@@ -17,28 +17,53 @@ void ConfigManager::watch(const std::string& section, const std::string& key, Wa
 
 // ── JSON 工具（极简，只提取一层嵌套的结构） ──
 
-// 检查最外层是 {}，且括号匹配
+// JSON 格式校验：检查括号匹配、字符串、基本结构
 bool ConfigManager::validate_json(const std::string& json) {
     auto trim = [](const std::string& s) -> std::string {
         size_t start = 0;
-        while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r'))
-            start++;
+        while (start < s.size() && std::isspace(s[start])) start++;
         size_t end = s.size();
-        while (end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r'))
-            end--;
+        while (end > start && std::isspace(s[end-1])) end--;
         return s.substr(start, end - start);
     };
     std::string t = trim(json);
     if (t.empty() || t[0] != '{' || t[t.size()-1] != '}') {
         return false;
     }
+
     int depth = 0;
-    for (char c : t) {
-        if (c == '{') depth++;
-        else if (c == '}') depth--;
+    bool in_string = false;
+    bool escape = false;
+    bool expect_key = false;  // 在对象内期望 key
+
+    for (size_t i = 0; i < t.size(); i++) {
+        char c = t[i];
+
+        if (escape) { escape = false; continue; }
+
+        if (in_string) {
+            if (c == '\\') escape = true;
+            else if (c == '"') { in_string = false; }
+            continue;
+        }
+
+        if (c == '"') {
+            in_string = true;
+            continue;
+        }
+
+        if (c == '{' || c == '[') {
+            depth++;
+            if (c == '{') expect_key = true;
+        } else if (c == '}' || c == ']') {
+            depth--;
+            expect_key = false;
+        }
+
         if (depth < 0) return false;
     }
-    return depth == 0;
+
+    return depth == 0 && !in_string;
 }
 
 // 从 {"section":{"key":value,...},...} 中提取值
@@ -192,5 +217,11 @@ std::string ConfigManager::handle_config_update(const std::string& payload) {
 
     notify_all(params_json);
     logger->info("配置热加载完成");
-    return "ACK: config updated and persisted";
+
+    // 计算校验和并返回（std::hash，非安全用途，仅用于 ACK 确认）
+    std::hash<std::string> hasher;
+    size_t hash = hasher(params_json);
+    char hash_str[32];
+    snprintf(hash_str, sizeof(hash_str), "%016zx", hash);
+    return "ACK: config updated, hash=" + std::string(hash_str);
 }

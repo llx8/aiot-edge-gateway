@@ -3,10 +3,15 @@
 #include <chrono>
 #include <unistd.h>
 #include <sys/eventfd.h>
+#include <poll.h>
 
 DbWriter::DbWriter(const std::string& db_path) : running_(false) {
     open_db(db_path);
     create_tables();
+    notify_fd_ = eventfd(0, EFD_NONBLOCK);
+    if (notify_fd_ < 0) {
+        GetLogger("DbWriter")->error("eventfd failed: {}", strerror(errno));
+    }
 }
 
 DbWriter::~DbWriter() {
@@ -14,6 +19,10 @@ DbWriter::~DbWriter() {
     if (db_) {
         sqlite3_close(db_);
         db_ = nullptr;
+    }
+    if (notify_fd_ >= 0) {
+        close(notify_fd_);
+        notify_fd_ = -1;
     }
 }
 
@@ -53,7 +62,13 @@ void DbWriter::create_tables() {
 }
 
 bool DbWriter::push(const DbRecord& record) {
-    return queue_.push(record);
+    if (!queue_.push(record)) return false;
+    // 队列满 50 条时提前唤醒 DB 线程
+    if (queue_.size() >= kBatchSize && notify_fd_ >= 0) {
+        uint64_t cnt = 1;
+        write(notify_fd_, &cnt, sizeof(cnt));
+    }
+    return true;
 }
 
 void DbWriter::start() {
@@ -75,8 +90,20 @@ void DbWriter::stop() {
 void DbWriter::loop() {
     GetLogger("DbWriter")->info("DB thread started");
     while (running_) {
-        // 每100ms检查一次，或被其他方式唤醒
-        usleep(100 * 1000);  // 100ms
+        // 等待：100ms 超时 或 eventfd 被写入（满 50 条提前唤醒）
+        int timeout_ms = 100;
+        if (notify_fd_ >= 0) {
+            pollfd pfd;
+            pfd.fd = notify_fd_;
+            pfd.events = POLLIN;
+            int ret = poll(&pfd, 1, timeout_ms);
+            if (ret > 0) {
+                uint64_t val;
+                read(notify_fd_, &val, sizeof(val));  // 消费 eventfd
+            }
+        } else {
+            usleep(timeout_ms * 1000);
+        }
 
         // 攒一批数据
         std::vector<DbRecord> batch;

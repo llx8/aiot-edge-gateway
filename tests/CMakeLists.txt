@@ -19,9 +19,9 @@ target_link_libraries(test_InternalMessage common GTest::gtest_main)
 
 add_test(NAME InternalMessageTest COMMAND test_InternalMessage)
 
-add_executable(test_SqliteStore test_SqliteStore.cpp)
-target_include_directories(test_SqliteStore PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
-target_link_libraries(test_SqliteStore gateway_core_lib GTest::gtest_main)
+add_executable(test_DbWriter test_DbWriter.cpp)
+target_include_directories(test_DbWriter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
+target_link_libraries(test_DbWriter gateway_core_lib GTest::gtest_main)
 
 add_executable(test_EventLoop test_EventLoop.cpp)
 target_include_directories(test_EventLoop PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
@@ -31,7 +31,7 @@ add_executable(test_ShmPublisher test_ShmPublisher.cpp)
 target_include_directories(test_ShmPublisher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../gateway_core)
 target_link_libraries(test_ShmPublisher gateway_core_lib GTest::gtest_main)
 
-add_test(NAME SqliteStoreTest COMMAND test_SqliteStore)
+add_test(NAME DbWriterTest COMMAND test_DbWriter)
 add_test(NAME EventLoopTest  COMMAND test_EventLoop)
 add_test(NAME ShmPublisherTest COMMAND test_ShmPublisher)
 

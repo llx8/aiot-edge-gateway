@@ -3,7 +3,6 @@ find_package(eclipse-paho-mqtt-c REQUIRED)
 
 add_library(gateway_core_lib STATIC
     EventLoop.cpp
-    SqliteStore.cpp
     ShmPublisher.cpp
     DbWriter.cpp
     MqttClient.cpp

@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 // 辅助：sysfs 导出 GPIO 引脚
-#ifdef __arm__   // RK3588 板端：真实 sysfs
+#if defined(__arm__) || defined(__aarch64__)   // ARM 板端：真实 sysfs
 static bool export_pin(int pin) {
     std::ofstream ofs("/sys/class/gpio/export");
     if (!ofs) return false;

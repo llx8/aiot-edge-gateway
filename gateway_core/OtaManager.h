@@ -19,8 +19,8 @@ public:
 private:
     bool download_model(const std::string& url, const std::string& dest_path);
     bool verify_sha256(const std::string& file_path, const std::string& expected_hash);
-    bool notify_engine_switch(const std::string& model_path);
-    void save_version(const std::string& model_name, const std::string& version, const std::string& md5);
+    bool notify_engine_switch(const std::string& model_path, const std::string& sha256);
+    void save_version(const std::string& model_name, const std::string& version, const std::string& sha256);
 
     std::string model_dir_;
     std::string db_path_;

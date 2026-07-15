@@ -12,7 +12,7 @@ OfflineStore::OfflineStore(const std::string& db_path) {
     sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
 
     const char* sql = R"(
-        CREATE TABLE IF NOT EXISTS offline_queue (
+        CREATE TABLE IF NOT EXISTS offline_cache (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             topic TEXT NOT NULL,
             payload TEXT NOT NULL,
@@ -29,7 +29,7 @@ OfflineStore::~OfflineStore() {
 bool OfflineStore::insert(const std::string& topic, const std::string& payload, int priority) {
     if (!db_) return false;
 
-    const char* sql = "INSERT INTO offline_queue (topic, payload, priority) VALUES (?, ?, ?);";
+    const char* sql = "INSERT INTO offline_cache (topic, payload, priority) VALUES (?, ?, ?);";
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
 
@@ -45,7 +45,7 @@ bool OfflineStore::insert(const std::string& topic, const std::string& payload, 
 bool OfflineStore::flush(MqttClient& mqtt_client) {
     if (!db_) return false;
 
-    const char* select_sql = "SELECT id, topic, payload FROM offline_queue ORDER BY priority DESC, id ASC;";
+    const char* select_sql = "SELECT id, topic, payload FROM offline_cache ORDER BY priority DESC, id ASC;";
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_, select_sql, -1, &stmt, nullptr);
 
@@ -58,7 +58,7 @@ bool OfflineStore::flush(MqttClient& mqtt_client) {
         if (mqtt_client.publish(topic, payload)) {
             // 成功 → 删这条
             sqlite3_stmt* del_stmt = nullptr;
-            sqlite3_prepare_v2(db_, "DELETE FROM offline_queue WHERE id = ?;", -1, &del_stmt, nullptr);
+            sqlite3_prepare_v2(db_, "DELETE FROM offline_cache WHERE id = ?;", -1, &del_stmt, nullptr);
             sqlite3_bind_int64(del_stmt, 1, id);
             sqlite3_step(del_stmt);
             sqlite3_finalize(del_stmt);
