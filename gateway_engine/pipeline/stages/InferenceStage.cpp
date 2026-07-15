@@ -1,4 +1,5 @@
 #include "InferenceStage.h"
+#include "Logger.h"
 #include <chrono>
 #include <thread>
 #include <cstring>
@@ -109,12 +110,58 @@ void InferenceStage::destroy_rknn() {
 }
 
 bool InferenceStage::switch_model(const std::string& model_path) {
-    destroy_rknn();
-    if (!init_rknn(model_path)) {
+    // 保存旧模型信息，用于失败回滚
+    auto old_ctx = ctx_;
+    auto old_input_buf = std::move(input_buf_);
+    auto old_input_attrs = std::move(input_attrs_);
+    auto old_output_attrs = std::move(output_attrs_);
+    auto old_io_num = io_num_;
+    auto old_input_size = input_size_;
+    auto old_model_path = model_path_;
+    ctx_ = 0;
+    input_buf_.clear();
+    input_attrs_.clear();
+    output_attrs_.clear();
+    io_num_ = {};
+    input_size_ = 0;
+
+    bool ok = init_rknn(model_path);
+    if (ok) {
+        // 新模型加载成功，销毁旧模型
+        if (old_ctx != 0) {
+            rknn_destroy(old_ctx);
+        }
+        model_path_ = model_path;
+        GetLogger("InferenceStage")->info("模型热切换成功: {} -> {}", old_model_path, model_path);
+        return true;
+    }
+
+    // 新模型加载失败，尝试回滚旧模型
+    GetLogger("InferenceStage")->error("新模型加载失败: {}, 尝试回滚旧模型: {}", model_path, old_model_path);
+
+    // 清理新模型可能残留的状态
+    if (ctx_ != 0) {
+        rknn_destroy(ctx_);
+        ctx_ = 0;
+    }
+
+    // 恢复旧模型
+    ctx_ = old_ctx;
+    input_buf_ = std::move(old_input_buf);
+    input_attrs_ = std::move(old_input_attrs);
+    output_attrs_ = std::move(old_output_attrs);
+    io_num_ = old_io_num;
+    input_size_ = old_input_size;
+    model_path_ = old_model_path;
+
+    if (ctx_ != 0) {
+        GetLogger("InferenceStage")->warn("已回滚到旧模型: {}", old_model_path);
         return false;
     }
-    model_path_ = model_path;
-    return true;
+
+    // 旧模型也无效（极端情况），上报 FATAL
+    GetLogger("InferenceStage")->error("FATAL: 旧模型回滚失败，模型文件可能已损坏");
+    return false;
 }
 
 void InferenceStage::run() {
@@ -178,17 +225,10 @@ void InferenceStage::run() {
         result.output_size = output_attrs_[0].n_elems;
         // 如果 output_attrs_[0].type == FLOAT32，n_elems 就是 float 数
         // 如果 type == UINT8，需要除 sizeof(float)
-        if (output_attrs_[0].type == RKNN_TENSOR_FLOAT32) {
-            result.output = (float*)malloc(outputs[0].size);
-            result.output_size = outputs[0].size / sizeof(float);
-        } else {
-            // 非 float 类型，按 byte 拷贝
-            result.output = (float*)malloc(outputs[0].size);
-            memcpy(result.output, outputs[0].buf, outputs[0].size);
-            result.output_size = outputs[0].size / sizeof(float);
-        }
+        result.output = (float*)malloc(outputs[0].size);
         if (result.output) {
             memcpy(result.output, outputs[0].buf, outputs[0].size);
+            result.output_size = outputs[0].size / sizeof(float);
         }
 
         // 释放 RKNN 输出

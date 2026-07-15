@@ -185,10 +185,7 @@ bool EventLoop::start() {
                 continue;
             }
 
-            if (listen_fds_.count(fd)) {
-                accept_connection(fd);
-            }
-            else if (fd_callbacks_.count(fd)) {
+            if (fd_callbacks_.count(fd)) {
                 // 消费eventfd
                 uint64_t val;
                 while (read(fd, &val, sizeof(val)) > 0) {}
@@ -230,7 +227,7 @@ void EventLoop::add_external_fd(int fd, FdCallback cb) {
     fd_callbacks_[fd] = std::move(cb);
     // 通知epoll监听新fd
     struct epoll_event ev{};
-    ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
+    ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = fd;
     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev);
 }
@@ -265,4 +262,17 @@ void EventLoop::set_monitor_path(const std::string& path) {
 
     monitor_listen_fds_.insert(listen_fd);
     GetLogger("gateway_core")->info("Monitor UDS path {}", path);
+}
+
+void EventLoop::send_to_monitor(const uint8_t* data, size_t len) {
+    // 向所有已连接的 monitor 客户端广播
+    for (int fd : monitor_client_fds_) {
+        ssize_t written = write(fd, data, len);
+        if (written < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+            GetLogger("gateway_core")->warn("Monitor client disconnected during send");
+            close(fd);
+            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
+            monitor_client_fds_.erase(fd);
+        }
+    }
 }

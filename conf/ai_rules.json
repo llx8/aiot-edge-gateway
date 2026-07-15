@@ -13,10 +13,30 @@
       "severity": 4
     },
     {
+      "name": "区域入侵电机运行中",
+      "ai_class_id": 1,
+      "sensor_condition": "motor_running == true",
+      "severity": 2
+    },
+    {
       "name": "烟火检测",
       "ai_class_id": 2,
       "sensor_condition": "true",
       "severity": 4
+    },
+    {
+      "name": "设备异常高温有人员",
+      "ai_class_id": 3,
+      "sensor_condition": "temp > 80.0",
+      "severity": 3,
+      "requires_co_class": 0
+    },
+    {
+      "name": "设备异常高温无人员",
+      "ai_class_id": 3,
+      "sensor_condition": "temp > 80.0",
+      "severity": 2,
+      "excludes_co_class": 0
     }
   ]
 }

@@ -34,6 +34,8 @@ public:
     bool subscribe(const std::string& topic, int qos = 1);
     // 查询连接状态
     bool is_connected() const;
+    // 连接成功后发布 BIRTH 消息（需在主线程调用）
+    bool publish_birth_if_needed();
     // 设置状态回调
     void set_status_callback(StatusCallback callback);
     // 取一条待处理的RPC指令
@@ -58,6 +60,7 @@ private:
     std::string broker_url_;
     std::string will_topic_;
     std::atomic<bool> connected_{false};
+    std::atomic<bool> birth_pending_{false};  // BIRTH 消息待发布
     int event_fd_;
     // RPC指令队列：mqtt回调入队， 主线程出队
     std::mutex rpc_mutex_;

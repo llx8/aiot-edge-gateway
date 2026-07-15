@@ -41,6 +41,7 @@ void MqttClient::disconnect(){
 // 回调函数
 void MqttClient::connected(const mqtt::string& cause){
     connected_ = true;
+    birth_pending_ = true;  // 连接成功后发布 BIRTH
     if (status_callback_) {
         status_callback_(true);
     }
@@ -122,6 +123,15 @@ bool MqttClient::connect(){
         GetLogger("MqttClient")->error("connect failed: {}", e.what());
         return false;
     }
+}
+
+// 发布 BIRTH 消息（主线程调用，连接成功后通知云端本设备上线）
+bool MqttClient::publish_birth_if_needed() {
+    if (!birth_pending_.exchange(false)) return false;
+    if (!connected_) return false;
+    // 在遗嘱主题上发布 "online"，与遗嘱消息 "offline" 配对
+    // 断连时 broker 自动发布遗嘱，形成 BIRTH/DEATH 语义
+    return publish(will_topic_, "online", 1);
 }
 
 // 订阅主题

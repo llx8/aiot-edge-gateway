@@ -1,8 +1,11 @@
 #pragma once
 
 #include <QMainWindow>
-#include "ShmReader.h"
 #include <QSocketNotifier>
+#include <memory>
+#include <vector>
+#include <cstdint>
+#include "ShmReader.h"
 
 class DashboardWidget;
 class AlarmTableWidget;
@@ -12,18 +15,23 @@ class AiSnapshotWidget;
 class MonitorWindow : public QMainWindow {
     Q_OBJECT
 public:
-    // 构造函数，创建ShmReader对象，并传入DashboardWidget和AlarmTableWidget
     explicit MonitorWindow(QWidget* parent = nullptr);
-    // 析构函数，销毁ShmReader对象
     ~MonitorWindow();
 private slots:
     void onShmNotify();
+    void onUdsData();  // 接收 JPEG 快照等数据
 private:
-    ShmReader* reader_; // MonitorWindow负责创建和销毁ShmReader对象
-    DashboardWidget* dashboard_;// 显示CPU、内存、在线节点数、总包数、总告警数、活动告警数
-    SensorChartWidget* chart_;      // 实时折线图
-    AlarmTableWidget* alarm_table_; // 显示告警信息的表格
-    AiSnapshotWidget* ai_snapshot_; // AI 检测快照显示
+    std::unique_ptr<ShmReader> reader_;
+    DashboardWidget* dashboard_;
+    SensorChartWidget* chart_;
+    AlarmTableWidget* alarm_table_;
+    AiSnapshotWidget* ai_snapshot_;
     int notify_fd_;
     QSocketNotifier* notifier_;
+
+    // UDS 持久连接：接收 gateway_core 推送的 JPEG 快照
+    int uds_fd_ = -1;
+    QSocketNotifier* uds_notifier_ = nullptr;
+    std::vector<uint8_t> uds_buf_;  // 接收缓冲区
+    static constexpr size_t kUdsBufSize = 512 * 1024;  // 512KB
 };

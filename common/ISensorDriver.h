@@ -17,6 +17,9 @@ public:
     // 适配器名字
     virtual std::string_view name() const = 0;
 
+    // 动态修改轮询间隔（默认空实现，子类按需覆写）
+    virtual void set_poll_interval(uint16_t interval_ms) {}
+
     // 数据回调函数
     using DataCallback = std::function<void(const InternalMessage& payload)>;
 

@@ -2,6 +2,7 @@
 #include "ISensorDriver.h"
 #include <string>
 #include <thread>
+#include <atomic>
 #include <cstdint>
 
 class ModbusTcpDriver : public ISensorDriver {
@@ -11,6 +12,7 @@ public:
     void start() override;
     void stop() override;
     std::string_view name() const override;
+    void set_poll_interval(uint16_t interval_ms) override;
     int event_fd() const;
 private:
     bool connect_to_server();      // 创建 socket + O_NONBLOCK + connect
@@ -23,7 +25,7 @@ private:
     int socket_fd_ = -1;
     int event_fd_ = -1;
     uint8_t slave_addr_ = 0;
-    uint16_t poll_interval_ms_ = 0;
+    std::atomic<uint16_t> poll_interval_ms_{0};
     uint16_t reg_start_ = 0;
     uint16_t reg_count_ = 0;
     bool running_ = false;

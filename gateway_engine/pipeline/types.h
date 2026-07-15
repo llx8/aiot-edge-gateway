@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
+#include <functional>
 
 namespace gateway_engine {
 // 帧数据
@@ -44,5 +46,12 @@ struct PipelineConfig {
     int queue_capacity = 4;
     // 帧内存池大小
     int frame_pool_size = 6;
+    // JPEG 快照质量 (1-100)
+    int jpeg_quality = 75;
 };
+
+// 检测回调：detections + 可选 JPEG 快照
+using DetectionCallback = std::function<void(
+    const std::vector<Detection>& detections,
+    const std::vector<uint8_t>& jpeg_data)>;
 }

@@ -22,6 +22,11 @@ pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-app-1.0)
 target_include_directories(gateway_engine_lib PUBLIC ${GSTREAMER_INCLUDE_DIRS})
 target_link_libraries(gateway_engine_lib PUBLIC common gateway_access_lib ${GSTREAMER_LIBRARIES})
 
+# JPEG 快照编码
+pkg_check_modules(LIBJPEG REQUIRED libjpeg)
+target_include_directories(gateway_engine_lib PUBLIC ${LIBJPEG_INCLUDE_DIRS})
+target_link_libraries(gateway_engine_lib PUBLIC ${LIBJPEG_LIBRARIES})
+
 add_executable(gateway_engine main.cpp)
 target_link_libraries(gateway_engine PRIVATE gateway_engine_lib)
 

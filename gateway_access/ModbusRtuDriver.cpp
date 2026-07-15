@@ -98,6 +98,11 @@ std::string_view ModbusRtuDriver::name() const {
     return "Modbus-RTU";
 }
 
+void ModbusRtuDriver::set_poll_interval(uint16_t interval_ms) {
+    poll_interval_ms_.store(interval_ms);
+    GetLogger("ModbusRtuDriver")->info("poll interval changed to {}ms", interval_ms);
+}
+
 // 主循环，轮询串口数据并处理
 void ModbusRtuDriver::poll_loop() {
     while (running_) {
@@ -125,10 +130,12 @@ void ModbusRtuDriver::poll_loop() {
             notify_main_thread();
         }
         // 6 等下一轮
-        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_));
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_.load()));
     }
 }
 
+#ifndef MODBUS_RTU_STATIC  // 静态链接时跳过(避免 dlopen 工厂函数冲突)
 extern "C" ISensorDriver* create_driver() {
     return new ModbusRtuDriver("/dev/ttyUSB0", 1, 1000, 0, 10);
 }
+#endif

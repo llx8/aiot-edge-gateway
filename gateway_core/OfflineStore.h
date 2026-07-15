@@ -10,7 +10,8 @@ public:
     explicit OfflineStore(const std::string& db_path);
     ~OfflineStore();
 
-    bool insert(const std::string& topic, const std::string& payload);
+    // priority: 0=周期数据, 1=告警（值越大越优先补传）
+    bool insert(const std::string& topic, const std::string& payload, int priority = 0);
     bool flush(MqttClient& mqtt_client);
 
 private:

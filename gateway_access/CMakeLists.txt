@@ -1,6 +1,8 @@
 # 网关核心逻辑库（不含 main，供测试链接）
 add_library(gateway_access_lib STATIC
     UdsClient.cpp
+    ModbusRtuDriver.cpp
+    ModbusTcpDriver.cpp
 )
 
 target_include_directories(gateway_access_lib PUBLIC
@@ -9,6 +11,8 @@ target_include_directories(gateway_access_lib PUBLIC
 )
 
 target_link_libraries(gateway_access_lib PUBLIC common)
+# 静态链接时跳过 dlopen 工厂函数，避免重复符号
+target_compile_definitions(gateway_access_lib PRIVATE MODBUS_RTU_STATIC MODBUS_TCP_STATIC)
 
 # 可执行文件（thin wrapper）
 add_executable(gateway_access main.cpp)

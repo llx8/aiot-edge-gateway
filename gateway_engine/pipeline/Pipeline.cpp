@@ -12,6 +12,8 @@ Pipeline::Pipeline(const PipelineConfig& cfg)
 Pipeline::~Pipeline() {}
 
 void Pipeline::start(std::string model_path) {
+    stop();
+
     if (model_path.empty()) {
         model_path = cfg_.model_path;
     }
@@ -22,7 +24,7 @@ void Pipeline::start(std::string model_path) {
     capture_     = std::make_unique<CaptureStage>(cfg_.video_path, cfg_.input_size, pool_.get(), &queue_1_);
     preprocess_  = std::make_unique<PreprocessStage>(&queue_1_, &queue_2_, cfg_.input_size); 
     inference_   = std::make_unique<InferenceStage>(&queue_2_, &queue_3_, model_path_);
-    postprocess_ = std::make_unique<PostprocessStage>(&queue_3_, cfg_.conf_threshold, cfg_.iou_threshold, cfg_.input_size);
+    postprocess_ = std::make_unique<PostprocessStage>(&queue_3_, cfg_.conf_threshold, cfg_.iou_threshold, cfg_.input_size, cfg_.jpeg_quality);
 
     // 倒序启动
     postprocess_->start();
@@ -70,6 +72,12 @@ float Pipeline::avg_latency_ms() const {
     if (latency_samples_.size() < 2) return 0.0f;
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(latency_samples_.back() - latency_samples_.front());
     return static_cast<float>(ms.count()) / (latency_samples_.size() - 1);
+}
+
+void Pipeline::set_throttle(bool enabled) {
+    if (capture_) {
+        capture_->set_throttle(enabled);
+    }
 }
 
 }

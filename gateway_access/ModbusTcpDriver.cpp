@@ -78,6 +78,11 @@ std::string_view ModbusTcpDriver::name() const {
     return "Modbus-TCP";
 }
 
+void ModbusTcpDriver::set_poll_interval(uint16_t interval_ms) {
+    poll_interval_ms_.store(interval_ms);
+    GetLogger("ModbusTcpDriver")->info("poll interval changed to {}ms", interval_ms);
+}
+
 // 主循环，轮询TCP数据并处理
 void ModbusTcpDriver::poll_loop() {
     while (running_) {
@@ -115,7 +120,7 @@ void ModbusTcpDriver::poll_loop() {
             notify_main_thread();
         }
         // 5 等下一轮
-        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_));
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_.load()));
     }
 }
 
@@ -173,6 +178,8 @@ void ModbusTcpDriver::reconnect() {
 }
 
 
+#ifndef MODBUS_TCP_STATIC  // 静态链接时跳过(避免 dlopen 工厂函数冲突)
 extern "C" ISensorDriver* create_driver() {
     return new ModbusTcpDriver("127.0.0.1", 502, 1, 1000, 0, 10);
 }
+#endif

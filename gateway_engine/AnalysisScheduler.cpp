@@ -1,6 +1,7 @@
 #include "AnalysisScheduler.h"
 #include "InternalMessage.h"
 #include <unistd.h>
+#include <sys/socket.h>
 #include <cstdint>
 
 // 构造函数
@@ -56,7 +57,7 @@ void AnalysisScheduler::start() {
 
 void AnalysisScheduler::stop() {
     running_ = false;
-    close(uds_fd_); // 关闭 UDS fd，唤醒阻塞的 read
+    shutdown(uds_fd_, SHUT_RD);
     if (thread_.joinable()) {
         thread_.join();
     }

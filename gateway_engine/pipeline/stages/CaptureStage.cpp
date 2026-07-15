@@ -14,6 +14,7 @@ CaptureStage::CaptureStage(const std::string& video_path, int input_size, FrameP
 }
 
 CaptureStage::~CaptureStage() {
+    stop();
     destroy_pipeline();
 }
 
@@ -101,6 +102,11 @@ void CaptureStage::run() {
         }
 
         GstBuffer* buffer = gst_sample_get_buffer(sample);
+        if (!buffer) {
+            gst_sample_unref(sample);
+            continue;
+        }
+
         GstMapInfo map;
         gst_buffer_map(buffer, &map, GST_MAP_READ);
 
@@ -113,6 +119,11 @@ void CaptureStage::run() {
 
         gst_buffer_unmap(buffer, &map);
         gst_sample_unref(sample);
+
+        // NPU 过热保护：温度 > 85°C 时降帧率（约 5fps）
+        if (throttle_.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
     }
 
     destroy_pipeline();

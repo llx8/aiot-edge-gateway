@@ -2,6 +2,7 @@
 #include "ISensorDriver.h"
 #include <string>
 #include <thread>
+#include <atomic>
 
 class ModbusRtuDriver : public ISensorDriver {
 public:
@@ -15,13 +16,15 @@ public:
     void stop() override;
     // 获取轮询线程名称
     std::string_view name() const override;
+    // 动态修改轮询间隔
+    void set_poll_interval(uint16_t interval_ms) override;
     int event_fd() const; // 获取事件文件描述符
 private:
     std::string serial_port_; // 串口路径
     int serial_fd_ = -1; // 串口文件描述符
     int event_fd_ = -1; // 事件文件描述符
     uint8_t slave_addr_; // 从站地址
-    uint16_t poll_interval_ms_; // 轮询间隔，单位毫秒
+    std::atomic<uint16_t> poll_interval_ms_{0}; // 轮询间隔，原子变量支持 RPC 热修改
     uint16_t reg_start_, reg_count_; // 注册器起始地址和数量
     bool running_; // 是否运行中
     std::thread poll_thread_; // 轮询线程

@@ -24,8 +24,10 @@ struct ShmBlock{
     char last_model_name[64];   // 当前模型名称
     int32_t snapshot_jpeg_len;  // 最后一次快照JPEG长度
 
-    uint8_t reserved[64]; // 预留空间
+    uint8_t _reserved[128]; // 预留空间，对齐设计文档
 };
+
+static_assert(sizeof(ShmBlock) <= 4096, "ShmBlock 超出页大小");
 
 struct ShmRegion{
     ShmBlock buffers[2]; // 双缓冲区

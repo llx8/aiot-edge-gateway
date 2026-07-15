@@ -28,6 +28,9 @@ public:
 
     float avg_latency_ms() const;
 
+    // NPU 过热保护：温度 > 85°C 时自动降帧率
+    void set_throttle(bool enabled);
+
 private:
     PipelineConfig cfg_;
     std::unique_ptr<FramePool> pool_;

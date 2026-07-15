@@ -16,6 +16,7 @@
 #include "HttpDashboard.h"
 #include "OtaManager.h"
 #include "InternalMessage.h"
+#include "GpioDriver.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -192,18 +193,6 @@ int main(){
         return "ACK";
     });
 
-    rpc_handler.register_method("get_device_health", [&](const std::string& payload){
-        std::ostringstream oss;
-        oss << "{"
-            << "\"mqtt_connected\":" << (mqtt.is_connected() ? "true" : "false") << ","
-            << "\"engine_online\":" << (engine_cmd_fd >= 0 ? "true" : "false") << ","
-            << "\"access_online\":" << (access_cmd_fd >= 0 ? "true" : "false") << ","
-            << "\"temp_max\":" << temp_max.load() << ","
-            << "\"hum_max\":" << hum_max.load()
-            << "}";
-        return oss.str();
-    });
-
     rpc_handler.register_method("ota_update_model", [&](const std::string& payload){
         return ota_manager.handle_ota_update(payload);
     });
@@ -222,6 +211,7 @@ int main(){
     mqtt.subscribe("spBv1.0/edge_gateway/DCMD/gw001");
 
     event_loop.add_external_fd(mqtt.event_fd(), [&](int fd){
+        mqtt.publish_birth_if_needed();
         RpcCommand cmd;
         while (mqtt.try_pop_rpc(cmd)) {
             std::string resp = rpc_handler.dispatch(cmd.payload);
@@ -262,6 +252,59 @@ int main(){
     int rule_periodic_counter = 0;
     int64_t total_packets = 0;
 
+    rpc_handler.register_method("get_device_health", [&](const std::string& payload){
+        // 读取 CPU 使用率（/proc/stat 第一行）
+        float cpu_usage = -1.0f;
+        {
+            std::ifstream stat("/proc/stat");
+            std::string line;
+            if (std::getline(stat, line) && line.find("cpu  ") == 0) {
+                std::istringstream iss(line.substr(5));
+                long user, nice, sys, idle, iowait, irq, softirq, steal;
+                if (iss >> user >> nice >> sys >> idle >> iowait >> irq >> softirq >> steal) {
+                    long total = user + nice + sys + idle + iowait + irq + softirq + steal;
+                    long total_idle = idle + iowait;
+                    if (total > 0) cpu_usage = 100.0f * (total - total_idle) / total;
+                }
+            }
+        }
+
+        // 读取内存使用率
+        float mem_usage = -1.0f;
+        {
+            std::ifstream meminfo("/proc/meminfo");
+            std::string line;
+            long total_kb = 0, avail_kb = 0;
+            while (std::getline(meminfo, line)) {
+                if (line.find("MemTotal:") == 0) {
+                    std::istringstream iss(line.substr(9));
+                    iss >> total_kb;
+                } else if (line.find("MemAvailable:") == 0) {
+                    std::istringstream iss(line.substr(13));
+                    iss >> avail_kb;
+                }
+                if (total_kb > 0 && avail_kb > 0) break;
+            }
+            if (total_kb > 0) mem_usage = 100.0f * (total_kb - avail_kb) / total_kb;
+        }
+
+        int engine_seconds = engine_manager.seconds_since_last_heartbeat(0);
+
+        std::ostringstream oss;
+        oss << "{"
+            << "\"mqtt_connected\":" << (mqtt.is_connected() ? "true" : "false") << ","
+            << "\"engine_online\":" << (engine_cmd_fd >= 0 ? "true" : "false") << ","
+            << "\"access_online\":" << (access_cmd_fd >= 0 ? "true" : "false") << ","
+            << "\"temp_max\":" << temp_max.load() << ","
+            << "\"hum_max\":" << hum_max.load() << ","
+            << "\"cpu_usage\":" << cpu_usage << ","
+            << "\"mem_usage\":" << mem_usage << ","
+            << "\"engine_last_heartbeat_sec\":" << engine_seconds << ","
+            << "\"total_packets\":" << total_packets
+            << "}";
+        return oss.str();
+    });
+
     event_loop.set_data_callback([&](int fd, const InternalMessage& msg){
         if (msg.source_type == 3) {
             engine_cmd_fd = fd;
@@ -278,6 +321,13 @@ int main(){
                 for (auto node_id : timed_out) {
                     logger->warn("进程 E 心跳超时: node={}", node_id);
                 }
+            } else if (msg.tlv_type == 0x07) {
+                // JPEG 快照：直接转发给 monitor 进程
+                auto encoded = encode_internal_msg(msg);
+                event_loop.send_to_monitor(encoded.data(), encoded.size());
+                ShmBlock block{};
+                block.snapshot_jpeg_len = static_cast<int32_t>(msg.payload.size());
+                shm_publisher.publish(block);
             } else if (msg.tlv_type == 0x04) {
                 auto fusion_result = event_fusion.evaluate(msg);
                 if (fusion_result.has_value()) {
@@ -285,6 +335,16 @@ int main(){
                     std::memcpy(&severity, fusion_result->payload.data()
                         + fusion_result->payload.size() - 4, 4);
                     logger->warn("复合告警! node={}, severity={}", msg.node_id, severity);
+
+                    // GPIO 硬件联动（设计文档规则表）
+                    if (severity >= 3) {
+                        GpioDriver::set_output(17, true);   // 声光报警
+                        logger->info("GPIO17 声光报警已触发");
+                    }
+                    if (severity >= 4) {
+                        GpioDriver::set_output(27, true);   // 继电器输出
+                        logger->info("GPIO27 继电器已触发");
+                    }
 
                     DbRecord record;
                     record.type = DbOpType::ALARM;
@@ -299,7 +359,7 @@ int main(){
                     if (mqtt.is_connected()) {
                         mqtt.publish(alarm_topic, record.data);
                     } else {
-                        offline_store.insert(alarm_topic, record.data);
+                        offline_store.insert(alarm_topic, record.data, 1);  // 告警优先
                     }
                 }
             }

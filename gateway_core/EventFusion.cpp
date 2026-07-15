@@ -3,6 +3,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 void EventFusion::add_rule(FusionRule rule) {
     rules_.push_back(std::move(rule));
@@ -25,6 +26,17 @@ std::optional<InternalMessage> EventFusion::evaluate(const InternalMessage& msg)
         std::memcpy(&num, msg.payload.data(), 4);
 
         constexpr size_t DET_SIZE = 24;
+
+        // 第一遍扫描：收集本帧中所有检测框的 class_id
+        std::unordered_set<int> present_classes;
+        for (int32_t i = 0; i < num; i++) {
+            size_t off = 4 + i * DET_SIZE;
+            if (off + DET_SIZE > msg.payload.size()) break;
+            int class_id;
+            std::memcpy(&class_id, msg.payload.data() + off + 20, 4);
+            present_classes.insert(class_id);
+        }
+
         int max_severity = 0;
 
         for (int32_t i = 0; i < num; i++) {
@@ -36,6 +48,15 @@ std::optional<InternalMessage> EventFusion::evaluate(const InternalMessage& msg)
 
             for (const auto& rule : rules_) {
                 if (rule.ai_class_id != class_id) continue;
+
+                // 跨检测框关联：需要同帧存在某类
+                if (rule.requires_co_class >= 0) {
+                    if (!present_classes.count(rule.requires_co_class)) continue;
+                }
+                // 跨检测框关联：排除同帧存在某类
+                if (rule.excludes_co_class >= 0) {
+                    if (present_classes.count(rule.excludes_co_class)) continue;
+                }
 
                 auto it = sensor_cache_.find(msg.node_id);
                 if (it == sensor_cache_.end()) {
@@ -120,10 +141,14 @@ bool EventFusion::load_rules_from_json(const std::string& path) {
             int class_id = std::stoi(extract("ai_class_id"));
             int severity = std::stoi(extract("severity"));
             std::string cond = extract("sensor_condition");
+            std::string co_str = extract("requires_co_class");
+            std::string excl_str = extract("excludes_co_class");
 
             FusionRule rule;
             rule.ai_class_id = class_id;
             rule.output_severity = severity;
+            rule.requires_co_class = co_str.empty() ? -1 : std::stoi(co_str);
+            rule.excludes_co_class = excl_str.empty() ? -1 : std::stoi(excl_str);
 
             if (cond == "true") {
                 rule.sensor_condition = [](float) { return true; };
@@ -133,6 +158,34 @@ bool EventFusion::load_rules_from_json(const std::string& path) {
             } else if (cond.find("temp <") != std::string::npos) {
                 float threshold = extract_val(cond.substr(cond.find('<') + 1));
                 rule.sensor_condition = [threshold](float v) { return v < threshold; };
+            } else if (cond.find("hour") != std::string::npos) {
+                // 时间条件：hour < 8 || hour > 18
+                // 传感器值代表当前小时数（由进程 B 在收到传感器数据时更新）
+                int lo = 0, hi = 24;
+                bool invert = false;
+                auto lo_pos = cond.find("hour <");
+                auto hi_pos = cond.find("hour >");
+                if (lo_pos != std::string::npos) {
+                    lo = static_cast<int>(extract_val(cond.substr(lo_pos + 6)));
+                }
+                if (hi_pos != std::string::npos) {
+                    hi = static_cast<int>(extract_val(cond.substr(hi_pos + 6)));
+                }
+                // 处理 || 逻辑：hour < 8 || hour > 18 表示 (hour < 8) || (hour > 18)
+                if (cond.find("||") != std::string::npos) {
+                    rule.sensor_condition = [lo, hi](float v) {
+                        int h = static_cast<int>(v);
+                        return h < lo || h > hi;
+                    };
+                } else {
+                    rule.sensor_condition = [lo, hi](float v) {
+                        int h = static_cast<int>(v);
+                        return h >= lo && h <= hi;
+                    };
+                }
+            } else if (cond.find("motor_running") != std::string::npos) {
+                // 布尔条件：motor_running == true
+                rule.sensor_condition = [](float v) { return v > 0.5f; };
             } else {
                 rule.sensor_condition = [](float) { return true; };
             }

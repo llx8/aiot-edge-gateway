@@ -35,7 +35,8 @@ static float read_npu_temp() {
 
 void HeartbeatReporter::send_heartbeat() {
     float fps = pipeline_.fps();
-    float npu_temp = read_npu_temp();
+    last_npu_temp_ = read_npu_temp();
+    float npu_temp = last_npu_temp_;
 
     InternalMessage msg;
     msg.source_type = 3;

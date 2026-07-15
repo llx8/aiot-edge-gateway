@@ -32,6 +32,9 @@ public:
     void set_monitor_path(const std::string& path);
     using FdReceivedCallback = std::function<void(int fd)>;
     void set_fd_received_callback(FdReceivedCallback cb);
+
+    // 向 monitor 进程发送数据（JPEG 快照等）
+    void send_to_monitor(const uint8_t* data, size_t len);
 private:
     std::vector<std::string> uds_paths_;
     int epoll_fd_;

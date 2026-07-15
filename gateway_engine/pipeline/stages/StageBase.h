@@ -5,7 +5,9 @@
 namespace gateway_engine {
 class StageBase {
 public:
-    virtual ~StageBase() = default;
+    virtual ~StageBase() {
+        stop();
+    }
 
     void start() {
         running_.store(true);
