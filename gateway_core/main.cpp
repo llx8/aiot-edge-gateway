@@ -17,7 +17,6 @@
 #include "HttpDashboard.h"
 #include "OtaManager.h"
 #include "InternalMessage.h"
-#include "GpioDriver.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -425,14 +424,12 @@ int main(){
                         + fusion_result->payload.size() - 4, 4);
                     logger->warn("复合告警! node={}, severity={}", msg.node_id, severity);
 
-                    // GPIO 硬件联动（设计文档规则表）
+                    // GPIO 硬件联动（无物理外设，跳过）
                     if (severity >= 3) {
-                        GpioDriver::set_output(17, true);   // 声光报警
-                        logger->info("GPIO17 声光报警已触发");
+                        logger->info("HIGH 级别告警: severity={}", severity);
                     }
                     if (severity >= 4) {
-                        GpioDriver::set_output(27, true);   // 继电器输出
-                        logger->info("GPIO27 继电器已触发");
+                        logger->info("CRITICAL 级别告警: severity={}", severity);
                     }
 
                     DbRecord record;

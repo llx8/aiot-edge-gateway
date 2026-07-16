@@ -42,7 +42,7 @@ int main() {
     }
 
     gateway_engine::PipelineConfig pipe_cfg;
-    pipe_cfg.video_path = "../video/video.mp4";
+    pipe_cfg.video_path = "video/video.mp4";
     pipe_cfg.model_path = "models/yolov5s.rknn";
 
     gateway_engine::Pipeline pipeline(pipe_cfg);

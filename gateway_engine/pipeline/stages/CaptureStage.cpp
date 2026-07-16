@@ -18,29 +18,14 @@ CaptureStage::~CaptureStage() {
     destroy_pipeline();
 }
 
-bool CaptureStage::is_rtsp() const {
-    return video_path_.find("rtsp://") == 0;
-}
-
 std::string CaptureStage::make_pipeline_str() const {
-    if (is_rtsp()) {
-        return "rtspsrc location=" + video_path_ +
-               " latency=0 protocols=tcp"
-               " ! rtph264depay ! h264parse"
-               " ! mppvideodec"
-               " ! videoconvert"
-               " ! video/x-raw,format=BGR,width=" + std::to_string(input_size_) +
-               ",height=" + std::to_string(input_size_) +
-               " ! appsink name=appsink";
-    } else {
-        return "filesrc location=" + video_path_ +
-               " ! qtdemux ! h264parse"
-               " ! mppvideodec"
-               " ! videoconvert"
-               " ! video/x-raw,format=BGR,width=" + std::to_string(input_size_) +
-               ",height=" + std::to_string(input_size_) +
-               " ! appsink name=appsink";
-    }
+    return "filesrc location=" + video_path_ +
+           " ! qtdemux ! h264parse"
+           " ! mppvideodec"
+           " ! videoconvert"
+           " ! video/x-raw,format=BGR,width=" + std::to_string(input_size_) +
+           ",height=" + std::to_string(input_size_) +
+           " ! appsink name=appsink";
 }
 
 void CaptureStage::destroy_pipeline() {

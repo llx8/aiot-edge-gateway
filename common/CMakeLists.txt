@@ -7,7 +7,6 @@ add_library(common STATIC
     Config.cpp
     ModbusRtu.cpp
     DriverLoader.cpp
-    GpioDriver.cpp
     ShmReader.cpp
     HttpDashboard.cpp
     Sha256.cpp

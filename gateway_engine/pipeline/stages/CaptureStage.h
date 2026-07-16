@@ -27,7 +27,6 @@ private:
     GstAppSink* appsink_ = nullptr;
     std::atomic<bool> throttle_{false};
 
-    bool is_rtsp() const;
     std::string make_pipeline_str() const;
     void destroy_pipeline();
     bool build_pipeline();

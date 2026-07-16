@@ -33,9 +33,9 @@ struct Detection {
 // pipline 配置
 struct PipelineConfig {
     // 模型文件路径
-    std::string model_path = "models/yolov8n.rknn";
+    std::string model_path = "models/yolov5s.rknn";
     // 视频文件路径
-    std::string video_path = "../video/video.mp4";
+    std::string video_path = "video/video.mp4";
     // 模型文件 SHA256（可选，用于校验模型完整性）
     std::string model_sha256;
     // 模型输入尺寸

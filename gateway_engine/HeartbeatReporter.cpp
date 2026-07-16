@@ -11,10 +11,8 @@ HeartbeatReporter::HeartbeatReporter(gateway_engine::Pipeline& pipeline, UdsClie
 static float read_npu_temp() {
     static const char* kPaths[] = {
         "/sys/class/thermal/thermal_zone6/temp",   // npu-thermal (RK3588)
-        "/sys/class/npu/npu_temp",
-        "/sys/devices/platform/fead0000.npu/thermal/npu_temp",
-        "/sys/class/thermal/thermal_zone0/temp",
-        "/sys/class/thermal/thermal_zone1/temp",
+        "/sys/class/thermal/thermal_zone0/temp",   // fallback: soc-thermal
+        "/sys/class/thermal/thermal_zone1/temp",   // fallback: bigcore0-thermal
     };
 
     for (const char* path : kPaths) {
