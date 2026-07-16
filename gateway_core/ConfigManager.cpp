@@ -140,6 +140,7 @@ bool ConfigManager::atomic_write(const std::string& content) {
 // ── 通知 watcher ──
 
 std::string ConfigManager::notify_all(const std::string& json) {
+    std::vector<std::string> errors;
     for (auto& w : watchers_) {
         std::string value;
         if (w.section.empty() && w.key.empty()) {
@@ -152,9 +153,17 @@ std::string ConfigManager::notify_all(const std::string& json) {
         if (result != "ACK") {
             GetLogger("ConfigManager")->warn("模块 [{}/{}] 重载失败: {}",
                 w.section, w.key, result);
+            errors.push_back("[" + w.section + "/" + w.key + "]: " + result);
         }
     }
-    return "ACK";
+    if (errors.empty()) return "ACK";
+
+    std::string combined = "NACK: ";
+    for (size_t i = 0; i < errors.size(); ++i) {
+        if (i > 0) combined += "; ";
+        combined += errors[i];
+    }
+    return combined;
 }
 
 // ── 加载持久化的热配置 ──
@@ -215,7 +224,11 @@ std::string ConfigManager::handle_config_update(const std::string& payload) {
         return "NACK: 写入失败";
     }
 
-    notify_all(params_json);
+    std::string notify_result = notify_all(params_json);
+    if (notify_result != "ACK") {
+        logger->warn("配置热加载部分失败: {}", notify_result);
+        return notify_result;
+    }
     logger->info("配置热加载完成");
 
     // 计算校验和并返回（std::hash，非安全用途，仅用于 ACK 确认）

@@ -157,11 +157,34 @@ std::string OtaManager::handle_ota_update(const std::string& payload) {
         return "NACK: failed to notify engine";
     }
 
-    save_version(model_name, version, expected_sha256);
+    // 设计:365-367 — B 必须等 E 的 ACK 才记录版本
+    // 先保存 pending 状态，收到引擎 ACK 后再 save_version + 报告成功
+    pending_ = PendingOta{model_name, version, expected_sha256, dest_path};
 
+    return "ACK: model switch sent, waiting for engine confirmation";
+}
+
+void OtaManager::on_model_switch_ack(int32_t node_id) {
+    (void)node_id;
+    if (!pending_) return;
+    auto logger = GetLogger("OtaManager");
+    logger->info("引擎模型切换 ACK，记录版本: {}", pending_->model_name);
+    save_version(pending_->model_name, pending_->version, pending_->sha256);
     if (status_reporter_) {
-        status_reporter_("OTA: model updated to " + model_name);
+        status_reporter_("OTA: model updated to " + pending_->model_name);
     }
+    pending_.reset();
+}
 
-    return "ACK: model updated to " + model_name;
+void OtaManager::on_model_switch_nack(int32_t node_id, const std::string& reason) {
+    (void)node_id;
+    if (!pending_) return;
+    auto logger = GetLogger("OtaManager");
+    logger->error("引擎模型切换 NACK: {}，清理下载文件", reason);
+    // 删除下载的模型文件（引擎无法加载）
+    std::remove(pending_->dest_path.c_str());
+    if (status_reporter_) {
+        status_reporter_("OTA: engine rejected model switch: " + reason);
+    }
+    pending_.reset();
 }

@@ -5,7 +5,8 @@
 
 HeartbeatReporter::HeartbeatReporter(gateway_engine::Pipeline& pipeline, UdsClient& client)
     : pipeline_(pipeline)
-    , client_(client) {}
+    , client_(client)
+    , last_tick_(std::chrono::steady_clock::now()) {}
 
 static float read_npu_temp() {
     static const char* kPaths[] = {
@@ -34,8 +35,16 @@ static float read_npu_temp() {
 }
 
 void HeartbeatReporter::send_heartbeat() {
-    pipeline_.tick_fps();  // 采样当前帧率
-    float fps = pipeline_.fps();
+    // 按真实时间间隔计算 fps：主循环 sleep(5) 调一次本函数，
+    // Pipeline::tick_fps() 返回的是"自上次 tick 以来的帧数"（非每秒帧数），
+    // 若直接当作 fps 上报，25fps 流会报成 125（5s 累计帧数）。
+    auto now = std::chrono::steady_clock::now();
+    float elapsed_sec = std::chrono::duration<float>(now - last_tick_).count();
+    last_tick_ = now;
+    if (elapsed_sec <= 0.0f) elapsed_sec = 1.0f;  // 防除零（首次/时钟回退）
+
+    pipeline_.tick_fps();  // 采样并重置帧计数
+    float fps = pipeline_.fps() / elapsed_sec;
     last_npu_temp_ = read_npu_temp();
     float npu_temp = last_npu_temp_;
 

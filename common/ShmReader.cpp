@@ -42,6 +42,11 @@ bool ShmReader::read(ShmBlock& block) {
 
     // 读取当前索引
     uint32_t idx = ptr_->read_index.load(std::memory_order_acquire);
+    // 防御：read_index 仅合法取值 0/1，异常值（共享内存未初始化/损坏）时
+    // 不能越界访问 buffers[]（构造函数已记录过该情况，此处兜底）
+    if (idx > 1) {
+        return false;
+    }
     // 更新last_read_index_
     last_read_index_ = idx;
     // 拷贝数据

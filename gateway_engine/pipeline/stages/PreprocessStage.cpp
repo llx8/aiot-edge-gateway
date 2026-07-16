@@ -65,25 +65,18 @@ void PreprocessStage::run() {
         std::vector<uint8_t> resized(new_w * new_h * 3);
         resize_bilinear(frame->data, frame->width, frame->height, resized.data(), new_w, new_h);
 
-        // 创建黑布，贴图
-        float* pre = (float*)frame->preprocessed_data;
-        memset(pre, 0, input_size_ * input_size_ * 3 * sizeof(float));
+        // 创建黑布 + 贴图：输出 uint8 NHWC（RGB letterbox 图像，RKNN 内部归一化 /255）
+        uint8_t* dst = frame->preprocessed_data;
+        std::memset(dst, 0, input_size_ * input_size_ * 3);
 
         for (int r = 0; r < new_h; ++r) {
         for (int c = 0; c < new_w; ++c) {
-            for (int ch = 0; ch < 3; ++ch) {
-                // 源位置 (HWC)
-                int src_idx = (r * new_w + c) * 3 + ch;
-                float val = resized[src_idx] / 255.0f;
-
-                // 目标位置 (CHW，带 pad)
-                int dst_r = r + pad_y;
-                int dst_c = c + pad_x;
-                int dst_idx = ch * input_size_ * input_size_
-                            + dst_r * input_size_
-                            + dst_c;
-                pre[dst_idx] = val;
-            }
+            // GStreamer 产出 BGR → YOLO 训练用 RGB，写入时交换 R/B
+            int si = (r * new_w + c) * 3;
+            int di = ((r + pad_y) * input_size_ + (c + pad_x)) * 3;
+            dst[di + 0] = resized[si + 2];  // R ← B
+            dst[di + 1] = resized[si + 1];  // G ← G
+            dst[di + 2] = resized[si + 0];  // B ← R
         }
     }
 

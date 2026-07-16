@@ -4,6 +4,7 @@
 #include <thread>
 #include <atomic>
 #include <cstdint>
+#include <vector>
 
 class ModbusTcpDriver : public ISensorDriver {
 public:
@@ -30,4 +31,6 @@ private:
     uint16_t reg_count_ = 0;
     bool running_ = false;
     std::thread poll_thread_ = {};
+    std::vector<uint8_t> recv_buf_;     // TCP 流式接收缓冲区（MBAP 分帧）
+    static constexpr size_t kMaxRecvBuf = 65536;  // 防止异常数据导致内存膨胀
 };

@@ -13,8 +13,12 @@ namespace gateway_engine {
 
 struct InferenceResult {
     std::shared_ptr<Frame> frame;
-    float* output = nullptr;     // 推理输出数据
-    int output_size = 0;         // 输出总 float 数
+    // 多输出模型（YOLOv5s 有 3 个尺度头 [1,255,80/40/20,80/40/20]）
+    struct Output {
+        std::vector<float> data;            // 输出 float 数据
+        std::vector<uint32_t> dims;         // 维度（如 [1,255,80,80]）
+    };
+    std::vector<Output> outputs;
 };
 
 class InferenceStage : public StageBase {

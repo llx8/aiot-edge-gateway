@@ -86,6 +86,16 @@ std::vector<uint8_t> PostprocessStage::encode_jpeg(const InferenceResult& result
 }
 
 void PostprocessStage::run() {
+    // YOLOv5s COCO 锚框（3 尺度，每尺度 3 个 anchor，成对 w/h）
+    struct AnchorSet { int stride; const int anchor[6]; };
+    static const AnchorSet kAnchors[] = {
+        {8,  {10, 13, 16, 30, 33, 23}},
+        {16, {30, 61, 62, 45, 59, 119}},
+        {32, {116, 90, 156, 198, 373, 326}},
+    };
+    static constexpr int kNumClasses = 80;
+    static constexpr int kPropBoxSize = 4 + 1 + kNumClasses;  // 85：4 框 + 1 obj + 80 类
+
     while (running_.load()) {
         InferenceResult result;
         if (!input_queue_->pop(result)) {
@@ -96,51 +106,72 @@ void PostprocessStage::run() {
         std::vector<Detection> detections;
         std::vector<uint8_t> jpeg_data;
 
-        if (result.output && result.output_size > 0 && result.frame) {
-            static constexpr int kNumClasses = 80;
-            static constexpr int kBoxChannels = 4;
-            int stride = kBoxChannels + kNumClasses;
-            int num_cells = result.output_size / stride;
-
+        if (result.frame && !result.outputs.empty()) {
             float scale = result.frame->letterbox_scale;
             int pad_x = result.frame->pad_x;
             int pad_y = result.frame->pad_y;
 
-            for (int i = 0; i < num_cells; ++i) {
-                float* cell = result.output + i * stride;
+            // 遍历每个输出头（YOLOv5s 3 个尺度：80×80 / 40×40 / 20×20）
+            for (const auto& out : result.outputs) {
+                if (out.dims.size() < 4 || out.data.empty()) continue;
+                // dims=[1,255,H,W]，H/W 为网格尺寸
+                int grid_h = static_cast<int>(out.dims[2]);
+                int grid_w = static_cast<int>(out.dims[3]);
+                int stride = input_size_ / grid_h;
+                const int* anchor = nullptr;
+                for (const auto& as : kAnchors) {
+                    if (as.stride == stride) { anchor = as.anchor; break; }
+                }
+                if (!anchor) continue;
 
-                float max_conf = 0.0f;
-                int max_class = -1;
-                for (int c = 0; c < kNumClasses; ++c) {
-                    float score = sigmoid(cell[kBoxChannels + c]);
-                    if (score > max_conf) {
-                        max_conf = score;
-                        max_class = c;
+                int grid_len = grid_h * grid_w;
+                const float* d = out.data.data();
+                for (int a = 0; a < 3; ++a) {
+                    for (int i = 0; i < grid_h; ++i) {
+                        for (int j = 0; j < grid_w; ++j) {
+                            int cell = i * grid_w + j;
+                            // 通道布局：channel = a*85 + field，按 [anchor][field][grid] 排布
+                            float obj = sigmoid(d[(a * kPropBoxSize + 4) * grid_len + cell]);
+                            if (obj < conf_threshold_) continue;  // obj 过低直接跳过，省算 80 类
+
+                            // YOLOv5 v6+ 框解码
+                            float x = sigmoid(d[(a * kPropBoxSize + 0) * grid_len + cell]) * 2.0f - 0.5f;
+                            float y = sigmoid(d[(a * kPropBoxSize + 1) * grid_len + cell]) * 2.0f - 0.5f;
+                            float w = sigmoid(d[(a * kPropBoxSize + 2) * grid_len + cell]) * 2.0f;
+                            float h = sigmoid(d[(a * kPropBoxSize + 3) * grid_len + cell]) * 2.0f;
+
+                            float cx = (x + j) * stride;
+                            float cy = (y + i) * stride;
+                            float bw = w * w * anchor[a * 2];
+                            float bh = h * h * anchor[a * 2 + 1];
+
+                            // 最大类别分数
+                            float max_score = 0.0f;
+                            int max_class = 0;
+                            for (int c = 0; c < kNumClasses; ++c) {
+                                float s = sigmoid(d[(a * kPropBoxSize + 5 + c) * grid_len + cell]);
+                                if (s > max_score) { max_score = s; max_class = c; }
+                            }
+                            float conf = obj * max_score;
+                            if (conf < conf_threshold_) continue;
+
+                            Detection det;
+                            det.class_id = max_class;
+                            det.confidence = conf;
+                            // 模型坐标(0..input_size) -> 原图坐标（去 letterbox 的 pad/scale）
+                            det.x = (cx - bw * 0.5f - pad_x) / scale;
+                            det.y = (cy - bh * 0.5f - pad_y) / scale;
+                            det.w = bw / scale;
+                            det.h = bh / scale;
+                            if (det.x < 0) det.x = 0;
+                            if (det.y < 0) det.y = 0;
+                            detections.push_back(det);
+                        }
                     }
                 }
-
-                if (max_conf < conf_threshold_) continue;
-
-                float cx = sigmoid(cell[0]);
-                float cy = sigmoid(cell[1]);
-                float w = std::exp(cell[2]);
-                float h = std::exp(cell[3]);
-
-                Detection det;
-                det.class_id = max_class;
-                det.confidence = max_conf;
-
-                det.x = (cx - w * 0.5f - pad_x) / scale;
-                det.y = (cy - h * 0.5f - pad_y) / scale;
-                det.w = w / scale;
-                det.h = h / scale;
-
-                if (det.x < 0) det.x = 0;
-                if (det.y < 0) det.y = 0;
-
-                detections.push_back(det);
             }
 
+            // NMS（按类别）
             std::sort(detections.begin(), detections.end(),
                 [](const Detection& a, const Detection& b) {
                     return a.confidence > b.confidence;
@@ -169,8 +200,7 @@ void PostprocessStage::run() {
             }
         }
 
-        free(result.output);
-        result.output = nullptr;
+        // InferenceResult.outputs 是 vector<float>，自动释放，无需手动 free
 
         if (callback_) {
             callback_(detections, jpeg_data);

@@ -10,6 +10,10 @@
 // 索引：0=B(gateway_core), 1=A(gateway_access), 2=C(gateway_monitor), 3=E(gateway_engine)
 pid_t g_children[4] = {0, 0, 0, 0};
 
+// 优雅退出标志：原实现主循环为 while(true)，收到 SIGTERM 后只杀子进程不退出，
+// 子进程退出又被主循环重启，导致 watchdog 无法正常关闭（必须 kill -9）
+static volatile sig_atomic_t g_running = 1;
+
 const char* g_names[4] = {"gateway_core", "gateway_access", "gateway_monitor", "gateway_engine"};
 const char* g_paths[4] = {
     "./build/gateway_core/gateway_core",
@@ -30,6 +34,7 @@ int g_restart_idx[4] = {0, 0, 0, 0};
 
 // 信号处理函数
 void signal_handler(int signum) {
+    g_running = 0;
     for (int i = 0; i < 4; ++i) {
         if (g_children[i] > 0) {
             kill(g_children[i], SIGTERM);
@@ -50,6 +55,9 @@ bool should_restart(int idx) {
             count++;
         }
     }
+    // 30s 内达 kMaxRestarts 次则暂停重启（设计:461）。
+    // 注：仅 kMaxRestarts 个环形槽位，count 上界即 kMaxRestarts，故用 >= 而非 >，
+    // 否则永不触发退避（原先就是 >=，保持不变）。
     if (count >= kMaxRestarts) {
         printf("[FATAL] %s restarted %d times in %ds, pausing restart\n",
                g_names[idx], kMaxRestarts, kWindowSec);
@@ -67,10 +75,11 @@ bool wait_ready(int idx, pid_t pid) {
     unlink(path);
 
     for (int i = 0; i < kReadyTimeoutSec * 10; ++i) {
-        // 子进程退出了？不再等
-        int status;
-        pid_t result = waitpid(pid, &status, WNOHANG);
-        if (result == pid) {
+        // 用 kill(pid,0) 检测进程是否还在，绝不在此 reap。
+        // 原先用 waitpid(WNOHANG) 会抢先 reap 启动失败退出的子进程，返回后 g_children 被清零，
+        // 主循环 waitpid(-1) 再也收不到该 PID -> 子进程永远不会被重启。
+        // 改为只探测存活，reap + 重启交给主循环。
+        if (kill(pid, 0) != 0) {
             printf("[watchdog] %s (PID %d) exited before ready\n", g_names[idx], pid);
             return false;
         }
@@ -122,32 +131,25 @@ int main() {
     // 启动顺序：B → E → A → C
     g_children[0] = start_child(0);  // gateway_core
     if (g_children[0] == -1) return 1;
-    if (!wait_ready(0, g_children[0])) {
-        g_children[0] = 0;  // 等后续 waitpid 循环处理
-    }
+    // wait_ready 失败时不清零 g_children：保留 PID 让主循环 reap+重启（清零则永不重启）
+    wait_ready(0, g_children[0]);
 
     g_children[3] = start_child(3);  // gateway_engine
     if (g_children[3] == -1) return 1;
-    if (!wait_ready(3, g_children[3])) {
-        g_children[3] = 0;
-    }
+    wait_ready(3, g_children[3]);
 
     g_children[1] = start_child(1);  // gateway_access
     if (g_children[1] == -1) return 1;
-    if (!wait_ready(1, g_children[1])) {
-        g_children[1] = 0;
-    }
+    wait_ready(1, g_children[1]);
 
     g_children[2] = start_child(2);  // gateway_monitor
     if (g_children[2] == -1) return 1;
-    if (!wait_ready(2, g_children[2])) {
-        g_children[2] = 0;
-    }
+    wait_ready(2, g_children[2]);
 
     printf("[watchdog] All children ready, entering monitor loop\n");
 
     // waitpid 循环
-    while (true) {
+    while (g_running) {
         int status;
         pid_t pid = waitpid(-1, &status, WNOHANG);
 
@@ -163,6 +165,14 @@ int main() {
                     }
 
                     if (should_restart(i)) {
+                        // 依赖检查：A/E/C 依赖 B (gateway_core) 的 UDS 服务
+                        // 若 B 已死，先重启 B 再重启当前进程
+                        if (i != 0 && g_children[0] > 0 && kill(g_children[0], 0) != 0) {
+                            printf("[watchdog] %s depends on %s (dead), restarting dependency first\n",
+                                   g_names[i], g_names[0]);
+                            g_children[0] = start_child(0);
+                            if (g_children[0] > 0) wait_ready(0, g_children[0]);
+                        }
                         printf("[watchdog] Restarting %s in 1s...\n", g_names[i]);
                         sleep(1);
                         g_children[i] = start_child(i);
@@ -176,4 +186,27 @@ int main() {
         }
         usleep(100000);
     }
+
+    // 优雅退出：signal_handler 已向子进程发 SIGTERM，这里兜底再发一次并 reap，
+    // 超时未退出的强杀，避免僵尸进程。原实现无此清理且主循环不退出。
+    for (int i = 0; i < 4; ++i) {
+        if (g_children[i] > 0) {
+            kill(g_children[i], SIGTERM);
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (g_children[i] > 0) {
+            int status;
+            for (int t = 0; t < 50; ++t) {  // 最多等 5s
+                if (waitpid(g_children[i], &status, WNOHANG) != 0) break;
+                usleep(100000);
+            }
+            if (waitpid(g_children[i], &status, WNOHANG) == 0) {
+                kill(g_children[i], SIGKILL);
+                waitpid(g_children[i], &status, 0);
+            }
+        }
+    }
+    printf("[watchdog] shutdown complete\n");
+    return 0;
 }

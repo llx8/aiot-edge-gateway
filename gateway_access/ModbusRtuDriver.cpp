@@ -106,6 +106,25 @@ void ModbusRtuDriver::set_poll_interval(uint16_t interval_ms) {
 // 主循环，轮询串口数据并处理
 void ModbusRtuDriver::poll_loop() {
     while (running_) {
+        // —— 超时剔除：已挂起则跳过正常轮询，等待复活间隔 ——
+        if (suspended_) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - last_revival_attempt_).count();
+            if (elapsed < kRevivalIntervalSec) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                continue;
+            }
+            // 尝试复活：重开串口
+            GetLogger("ModbusRtuDriver")->info("尝试复活从站 0x{:02x} (挂起 {}s)",
+                slave_addr_, kRevivalIntervalSec);
+            if (!open_serial()) {
+                last_revival_attempt_ = std::chrono::steady_clock::now();
+                continue;
+            }
+            suspended_ = false;
+            consecutive_timeouts_ = 0;
+        }
+
         // 1 编码请求
         ModbusRequest req{slave_addr_, 0x03, reg_start_, reg_count_};
         auto frame = encode_request(req);
@@ -117,17 +136,37 @@ void ModbusRtuDriver::poll_loop() {
         // 4 解码
         ModbusResponse resp;
         if (n > 0 && decode_response(buf, n, resp)) {
+            // 成功：清零超时计数
+            consecutive_timeouts_ = 0;
             // 处理响应 回调函数
             InternalMessage msg;
             msg.source_type = 0;  // 0 = Modbus
             msg.node_id = slave_addr_;
             msg.tlv_type = 0x01;
             if (resp.registers.size() > 0) {
-                msg.payload.assign(resp.registers.begin(), resp.registers.end());
+                // 寄存器为 uint16，payload 为字节流，须按大端序列化；
+                // 原先 assign 逐元素隐式转 uint8 会丢失每个寄存器值的高字节
+                msg.payload.resize(resp.registers.size() * 2);
+                for (size_t i = 0; i < resp.registers.size(); ++i) {
+                    msg.payload[i * 2]     = static_cast<uint8_t>(resp.registers[i] >> 8);
+                    msg.payload[i * 2 + 1] = static_cast<uint8_t>(resp.registers[i] & 0xFF);
+                }
             }
             m_on_data(msg);
             // 5 通知主线程
             notify_main_thread();
+        } else {
+            // 超时或解码失败
+            consecutive_timeouts_++;
+            if (consecutive_timeouts_ >= kMaxTimeouts) {
+                GetLogger("ModbusRtuDriver")->warn(
+                    "从站 0x{:02x} 连续{}次超时，挂起({}s后尝试复活)",
+                    slave_addr_, consecutive_timeouts_, kRevivalIntervalSec);
+                suspended_ = true;
+                last_revival_attempt_ = std::chrono::steady_clock::now();
+                close(serial_fd_);
+                serial_fd_ = -1;
+            }
         }
         // 6 等下一轮
         std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_.load()));

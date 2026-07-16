@@ -92,32 +92,67 @@ void ModbusTcpDriver::poll_loop() {
         trans_id_++;
         // 2 写TCP
         write(socket_fd_, frame.data(), frame.size());
-        // 3 等待TCP响应（带超时）
+        // 3 等待TCP响应（带超时），追加到接收缓冲区
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(socket_fd_, &rfds);
         struct timeval tv{0, 500000};  // 500ms
-        uint8_t buf[256];
-        ssize_t n = -1;
         if (select(socket_fd_ + 1, &rfds, nullptr, nullptr, &tv) > 0) {
-            n = read(socket_fd_, buf, sizeof(buf));
-        }
-        if (n <= 0) {
+            uint8_t buf[256];
+            ssize_t n = read(socket_fd_, buf, sizeof(buf));
+            if (n > 0) {
+                recv_buf_.insert(recv_buf_.end(), buf, buf + n);
+                // 防止异常数据导致内存膨胀
+                if (recv_buf_.size() > kMaxRecvBuf) {
+                    recv_buf_.clear();
+                    reconnect();
+                    continue;
+                }
+            } else {
+                recv_buf_.clear();
+                reconnect();
+                continue;
+            }
+        } else {
+            // select 超时
+            recv_buf_.clear();
             reconnect();
             continue;
         }
-        // 4 解码
-        ModbusResponse resp;
-        if (decode_tcp_response(buf, n, resp)) {
-            InternalMessage msg;
-            msg.source_type = 0;  // 0 = Modbus
-            msg.node_id = slave_addr_;
-            msg.tlv_type = 0x01;
-            if (resp.registers.size() > 0) {
-                msg.payload.assign(resp.registers.begin(), resp.registers.end());
+        // 4 从缓冲区提取完整帧（MBAP 头 6 字节，其中 offset 4-5 为长度字段）
+        bool decoded_any = false;
+        while (recv_buf_.size() >= 6) {
+            // MBAP 长度字段 = unit_id(1) + PDU 长度
+            uint16_t mbap_len = (static_cast<uint16_t>(recv_buf_[4]) << 8) | recv_buf_[5];
+            // 长度合理性检查：Modbus TCP 最大帧约 260 字节
+            if (mbap_len < 1 || mbap_len > 256) {
+                recv_buf_.clear();
+                reconnect();
+                break;
             }
-            m_on_data(msg);
-            notify_main_thread();
+            size_t total_len = 6 + mbap_len;
+            if (recv_buf_.size() < total_len) break;  // 帧不完整，等下一轮 read
+
+            ModbusResponse resp;
+            if (decode_tcp_response(recv_buf_.data(), total_len, resp)) {
+                InternalMessage msg;
+                msg.source_type = 0;  // 0 = Modbus
+                msg.node_id = slave_addr_;
+                msg.tlv_type = 0x01;
+                if (resp.registers.size() > 0) {
+                    // 寄存器为 uint16，payload 为字节流，须按大端序列化
+                    msg.payload.resize(resp.registers.size() * 2);
+                    for (size_t i = 0; i < resp.registers.size(); ++i) {
+                        msg.payload[i * 2]     = static_cast<uint8_t>(resp.registers[i] >> 8);
+                        msg.payload[i * 2 + 1] = static_cast<uint8_t>(resp.registers[i] & 0xFF);
+                    }
+                }
+                m_on_data(msg);
+                notify_main_thread();
+                decoded_any = true;
+            }
+            // 从缓冲区移除已处理的帧
+            recv_buf_.erase(recv_buf_.begin(), recv_buf_.begin() + total_len);
         }
         // 5 等下一轮
         std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_.load()));
@@ -158,6 +193,17 @@ bool ModbusTcpDriver::connect_to_server() {
         socket_fd_ = -1;
         return false;
     }
+    // select 可写不代表连接成功（连接失败时 socket 也会变可写并带 pending error），
+    // 必须用 SO_ERROR 确认，否则会误判已连接，后续 write/read 失败空转重连
+    int err = 0;
+    socklen_t errlen = sizeof(err);
+    if (getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, &err, &errlen) < 0 || err != 0) {
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    // 5. 恢复阻塞模式：poll_loop 中 write/read 依赖阻塞语义且未检查返回值
+    fcntl(socket_fd_, F_SETFL, flags & ~O_NONBLOCK);
     return true;
 }
 

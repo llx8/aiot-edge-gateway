@@ -1,6 +1,7 @@
 #include "EventFusion.h"
 #include "Logger.h"
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
@@ -167,10 +168,11 @@ bool EventFusion::load_rules_from_json(const std::string& path) {
                 float threshold = extract_val(cond.substr(cond.find('<') + 1));
                 rule.sensor_condition = [threshold](float v) { return v < threshold; };
             } else if (cond.find("hour") != std::string::npos) {
-                // 时间条件：hour < 8 || hour > 18
-                // 传感器值代表当前小时数（由进程 B 在收到传感器数据时更新）
+                // 时间条件：hour < 8 || hour > 18 表示非工作时间。
+                // 必须用系统时钟取当前小时，不能用传感器数值 v——
+                // 原实现 int h = (int)v 把温度/湿度当小时数（如 42.5°C -> h=42 -> 42>18 恒真），
+                // 导致"非工作时间"规则在白天也持续触发。这里忽略 v，改读系统时钟。
                 int lo = 0, hi = 24;
-                bool invert = false;
                 auto lo_pos = cond.find("hour <");
                 auto hi_pos = cond.find("hour >");
                 if (lo_pos != std::string::npos) {
@@ -179,15 +181,17 @@ bool EventFusion::load_rules_from_json(const std::string& path) {
                 if (hi_pos != std::string::npos) {
                     hi = static_cast<int>(extract_val(cond.substr(hi_pos + 6)));
                 }
-                // 处理 || 逻辑：hour < 8 || hour > 18 表示 (hour < 8) || (hour > 18)
                 if (cond.find("||") != std::string::npos) {
-                    rule.sensor_condition = [lo, hi](float v) {
-                        int h = static_cast<int>(v);
+                    // hour < lo || hour > hi
+                    rule.sensor_condition = [lo, hi](float) {
+                        time_t now = time(nullptr);
+                        int h = localtime(&now)->tm_hour;
                         return h < lo || h > hi;
                     };
                 } else {
-                    rule.sensor_condition = [lo, hi](float v) {
-                        int h = static_cast<int>(v);
+                    rule.sensor_condition = [lo, hi](float) {
+                        time_t now = time(nullptr);
+                        int h = localtime(&now)->tm_hour;
                         return h >= lo && h <= hi;
                     };
                 }

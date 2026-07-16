@@ -22,7 +22,8 @@ int main() {
     signal(SIGTERM, signal_handler);
 
     mkdir("/tmp/gateway_watchdog", 0755);
-    std::ofstream("/tmp/gateway_watchdog/gateway_engine.ready") << "1";
+    // ready 信号延迟到 UDS 连接 + Pipeline 创建完成后才写（见下方），
+    // 否则初始化失败退出时 watchdog 仍误判已就绪
 
     // 写 PID 文件，供 setup_cgroups.sh 自动附加
     std::ofstream pid_file("/tmp/gateway_engine.pid");
@@ -42,7 +43,7 @@ int main() {
 
     gateway_engine::PipelineConfig pipe_cfg;
     pipe_cfg.video_path = "../video/video.mp4";
-    pipe_cfg.model_path = "models/yolov8n.rknn";
+    pipe_cfg.model_path = "models/yolov5s.rknn";
 
     gateway_engine::Pipeline pipeline(pipe_cfg);
     pipeline.setFatalCallback([&](const std::string& reason) {
@@ -97,6 +98,9 @@ int main() {
 
     AnalysisScheduler scheduler(pipeline, uds_client.fd());
     scheduler.start();
+
+    // 初始化全部完成，此时才通知 watchdog 就绪
+    std::ofstream("/tmp/gateway_watchdog/gateway_engine.ready") << "1";
 
     // 主循环心跳
     HeartbeatReporter heartbeat(pipeline, uds_client);

@@ -8,21 +8,25 @@ DashboardWidget::DashboardWidget(ShmReader& reader, QWidget* parent)
     : QWidget(parent)
     , reader_(reader)
 {
-    // 创建6个Label显示数值
+    // 创建8个Label显示数值
     cpu_val_ = new QLabel("N/A", this);
     mem_val_ = new QLabel("N/A", this);
     online_nodes_val_ = new QLabel("N/A", this);
     total_packets_val_ = new QLabel("N/A", this);
     total_alarm_val_ = new QLabel("N/A", this);
     alarm_active_val_ = new QLabel("N/A", this);
+    npu_temp_val_ = new QLabel("N/A", this);
+    inference_fps_val_ = new QLabel("N/A", this);
 
-    // 创建6个Label显示标题
+    // 创建8个Label显示标题
     QLabel* cpu_label = new QLabel("CPU Usage:", this);
     QLabel* mem_label = new QLabel("Memory Usage:", this);
     QLabel* online_nodes_label = new QLabel("Online Nodes:", this);
     QLabel* total_packets_label = new QLabel("Total Packets:", this);
     QLabel* total_alarm_label = new QLabel("Total Alarms:", this);
     QLabel* alarm_active_label = new QLabel("Active Alarms:", this);
+    QLabel* npu_temp_label = new QLabel("NPU Temp:", this);
+    QLabel* inference_fps_label = new QLabel("Inference FPS:", this);
 
     // 使用QGridLayout布局
     QGridLayout* layout = new QGridLayout(this);
@@ -38,6 +42,10 @@ DashboardWidget::DashboardWidget(ShmReader& reader, QWidget* parent)
     layout->addWidget(total_alarm_val_, 4, 1);
     layout->addWidget(alarm_active_label, 5, 0);
     layout->addWidget(alarm_active_val_, 5, 1);
+    layout->addWidget(npu_temp_label, 6, 0);
+    layout->addWidget(npu_temp_val_, 6, 1);
+    layout->addWidget(inference_fps_label, 7, 0);
+    layout->addWidget(inference_fps_val_, 7, 1);
 
     setLayout(layout);
 }
@@ -60,6 +68,13 @@ void DashboardWidget::refresh() {
         total_packets_val_->setText(QString::number(block.total_packets));
         total_alarm_val_->setText(QString::number(block.total_alarms));
         alarm_active_val_->setText(QString::number(block.alarm_active));
+        // NPU 指标（设计:392 仪表盘需含 NPU 温度/推理FPS）
+        npu_temp_val_->setText(block.npu_temp_c > 0
+            ? QString::number(block.npu_temp_c, 'f', 1) + " C"
+            : QString("N/A"));
+        inference_fps_val_->setText(block.inference_fps > 0
+            ? QString::number(block.inference_fps, 'f', 1)
+            : QString("N/A"));
     } else {
         // 如果读取失败，显示N/A
         // 打印日志

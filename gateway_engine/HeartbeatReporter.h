@@ -2,6 +2,7 @@
 
 #include "pipeline/Pipeline.h"
 #include "UdsClient.h"
+#include <chrono>
 
 class HeartbeatReporter {
 public:
@@ -17,4 +18,6 @@ private:
     gateway_engine::Pipeline& pipeline_;
     UdsClient& client_;
     float last_npu_temp_ = -1.0f;
+    // 上次 tick 时刻：用于按真实间隔计算 fps（主循环 sleep(5) 非精确 1s）
+    std::chrono::steady_clock::time_point last_tick_;
 };

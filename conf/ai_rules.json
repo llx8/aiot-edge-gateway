@@ -1,9 +1,9 @@
 {
   "rules": [
     {
-      "name": "安全帽缺失高温告警",
+      "name": "安全帽缺失",
       "ai_class_id": 0,
-      "sensor_condition": "temp > 40.0",
+      "sensor_condition": "true",
       "severity": 3
     },
     {

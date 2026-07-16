@@ -46,10 +46,14 @@ bool decode_response(const uint8_t* data, size_t len, ModbusResponse& resp){
         return false;   // 错误码
     }
     uint8_t byte_count = data[2];
+    // 越界保护：byte_count 来自总线，须校验数据区 + CRC 不超过实际长度
+    if (3 + byte_count + 2 > len) {
+        return false;
+    }
     resp.byte_count = byte_count;
     resp.registers.resize(byte_count / 2);
     for (size_t i = 0; i < resp.registers.size(); i++) {
-        resp.registers[i] = (data[3 + i * 2] << 8) | data[3 + i * 2 + 1];
+        resp.registers[i] = (static_cast<uint16_t>(data[3 + i * 2]) << 8) | data[3 + i * 2 + 1];
     }
     return true;
 }
@@ -104,10 +108,14 @@ bool decode_tcp_response(const uint8_t* data, size_t len, ModbusResponse& resp){
         return false;   // 错误码
     }
     uint8_t byte_count = data[8];
+    // TCP 无 CRC 保护，byte_count 越界校验必不可少（否则可越界读栈内存）
+    if (9 + byte_count > len) {
+        return false;
+    }
     resp.byte_count = byte_count;
     resp.registers.resize(byte_count / 2);
     for (size_t i = 0; i < resp.registers.size(); i++) {
-        resp.registers[i] = (data[9 + i * 2] << 8) | data[9 + i * 2 + 1];
+        resp.registers[i] = (static_cast<uint16_t>(data[9 + i * 2]) << 8) | data[9 + i * 2 + 1];
     }
     return true;
 }

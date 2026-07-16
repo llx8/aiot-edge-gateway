@@ -120,27 +120,26 @@ std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
         receive_fd(client_fd);
         return {};
     }
-    uint8_t buffer[4096];
-    size_t total_read = 0;
+    // SOCK_SEQPACKET 保消息边界：一次 read() = 一条完整 InternalMessage。
+    // 1) 读缓冲须容纳最大消息：JPEG 快照可达 200KB+（设计要求 UDS send buffer ≥ 512KB），
+    //    原先 4096 栈缓冲会截断 SEQPACKET 大消息，截断部分被内核丢弃且 decode 失败后
+    //    残留数据卡住 ring_buffer，阻塞该连接后续所有消息。
+    // 2) SEQPACKET 天然分帧，无需 ring_buffer 流式拼包；原 ring_buffer 线性读越过环绕点
+    //    会越界，故直接对读到的整条消息解码。
+    static constexpr size_t kMaxMsgSize = 1 << 20;  // 1MB
+    static thread_local std::vector<uint8_t> buffer(kMaxMsgSize);
     std::vector<InternalMessage> messages;
 
-    while(true) {
-        ssize_t n = read(client_fd, buffer, sizeof(buffer));
+    while (true) {  // ET 边沿触发：必须读到 EAGAIN
+        ssize_t n = read(client_fd, buffer.data(), buffer.size());
         if (n > 0) {
-            total_read += n;
-            ring_buffer_.append(buffer, n);
-
-            while(ring_buffer_.available_to_read() > 0) {
-                auto result = decode_internal_msg(ring_buffer_.read_ptr(), ring_buffer_.available_to_read());
-                if (!result.ok) {
-                    break;
-                }
+            auto result = decode_internal_msg(buffer.data(), static_cast<size_t>(n));
+            if (result.ok) {
                 messages.push_back(std::move(result.msg));
-                ring_buffer_.consume(result.consumed);
+            } else {
+                GetLogger("gateway_core")->warn("decode InternalMessage failed, size={}", n);
             }
-            if (total_read >= kBufferSize) {
-                break;
-            }
+            continue;  // 继续读，直到 EAGAIN（ET 模式不能提前 break，否则丢数据）
         }
         else if (n == 0) {
             close(client_fd);
@@ -266,13 +265,19 @@ void EventLoop::set_monitor_path(const std::string& path) {
 
 void EventLoop::send_to_monitor(const uint8_t* data, size_t len) {
     // 向所有已连接的 monitor 客户端广播
+    // 不能在 range-for 中 erase 当前元素（unordered_set 迭代器失效属 UB），
+    // 先收集断开的 fd，循环结束后统一清理
+    std::vector<int> dead;
     for (int fd : monitor_client_fds_) {
         ssize_t written = write(fd, data, len);
         if (written < 0 && (errno == EPIPE || errno == ECONNRESET)) {
             GetLogger("gateway_core")->warn("Monitor client disconnected during send");
-            close(fd);
-            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
-            monitor_client_fds_.erase(fd);
+            dead.push_back(fd);
         }
+    }
+    for (int fd : dead) {
+        close(fd);
+        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
+        monitor_client_fds_.erase(fd);
     }
 }

@@ -3,6 +3,7 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 class ModbusRtuDriver : public ISensorDriver {
 public:
@@ -28,6 +29,13 @@ private:
     uint16_t reg_start_, reg_count_; // 注册器起始地址和数量
     bool running_; // 是否运行中
     std::thread poll_thread_; // 轮询线程
+
+    // 超时剔除与复活（设计:102：连续3次超时挂起，30s尝试复活一次）
+    int consecutive_timeouts_ = 0;
+    bool suspended_ = false;
+    std::chrono::steady_clock::time_point last_revival_attempt_;
+    static constexpr int kMaxTimeouts = 3;
+    static constexpr int kRevivalIntervalSec = 30;
 
     // 打开串口文件
     bool open_serial();

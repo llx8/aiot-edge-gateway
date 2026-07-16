@@ -11,14 +11,16 @@ FramePool::FramePool(int pool_size, int width, int height, int channels)
     , height_(height)
     , channels_(channels)
 {
-    size_t buf_size = width_ * height_ * channels_;
+    size_t data_buf_size = width_ * height_ * channels_;                       // uint8 原始像素
+    // preprocessed_data 也按 uint8 尺寸（PreprocessStage 输出 uint8 NHWC letterbox 图像，
+    // RKNN 内部做归一化 /255，故预处理不需要 float 缓冲区）
 
     slots_.resize(pool_size_);
     frames_.resize(pool_size_);
 
     for (int i = 0; i < pool_size_; ++i) {
-        slots_[i].data.resize(buf_size);
-        slots_[i].preprocessed_data.resize(buf_size);
+        slots_[i].data.resize(data_buf_size);
+        slots_[i].preprocessed_data.resize(data_buf_size);
 
         frames_[i].data = slots_[i].data.data();
         frames_[i].preprocessed_data = slots_[i].preprocessed_data.data();

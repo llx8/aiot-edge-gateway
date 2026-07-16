@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <string>
 #include <vector>
 #include <functional>
@@ -18,7 +19,8 @@ public:
 
 private:
     std::vector<std::pair<std::string, MethodHandler>> handlers_;
-    std::unordered_set<std::string> seen_ids_;  // 防重放：已处理过的请求 id
+    std::unordered_set<std::string> seen_ids_;  // 防重放：已处理过的请求 id (O(1) 查重)
+    std::deque<std::string> id_order_;           // 插入顺序，用于 FIFO 逐出最旧条目
     std::mutex seen_mutex_;
-    static constexpr size_t kMaxSeenIds = 10000;  // 防止内存膨胀
+    static constexpr size_t kMaxSeenIds = 10000;  // 防止内存膨胀（FIFO逐出，不全部清空）
 };

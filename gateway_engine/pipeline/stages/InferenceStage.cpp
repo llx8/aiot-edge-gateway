@@ -195,10 +195,8 @@ void InferenceStage::run() {
         return;
     }
 
-    // 准备 rknn_input / rknn_output
-    rknn_input inputs[1];
-    rknn_output outputs[1];
-
+    // 准备 rknn_input / rknn_output（按模型实际 IO 数动态分配，原先固定 [1] 数组在
+    // 多输出模型如 YOLOv5s(n_output=3) 会栈溢出）
     while (running_.load()) {
         std::shared_ptr<Frame> frame;
         if (!input_queue_->pop(frame)) {
@@ -214,16 +212,20 @@ void InferenceStage::run() {
         std::lock_guard<std::mutex> lock(model_mutex_);
         if (ctx_ == 0) continue;  // 模型未加载，跳过
 
-        // 设置 RKNN 输入
-        memset(inputs, 0, sizeof(inputs));
-        inputs[0].index = 0;
-        inputs[0].type = RKNN_TENSOR_UINT8;
-        inputs[0].size = input_buf_.size();
-        inputs[0].fmt = RKNN_TENSOR_NHWC;
-        inputs[0].buf = frame->preprocessed_data;
-        inputs[0].pass_through = 0;
+        // 设置 RKNN 输入：PreprocessStage 输出 uint8 NHWC RGB letterbox 图像，
+        // pass_through=0 让 RKNN 内部做 /255 归一化并转换到模型内部格式。
+        // （与 Rockchip 参考工程一致：喂 uint8，RKNN 做均值/标准差归一化）
+        std::vector<rknn_input> inputs(io_num_.n_input);
+        for (uint32_t i = 0; i < io_num_.n_input; ++i) {
+            inputs[i].index = i;
+            inputs[i].type = RKNN_TENSOR_UINT8;
+            inputs[i].fmt  = RKNN_TENSOR_NHWC;
+            inputs[i].size = static_cast<uint32_t>(input_size_) * input_size_ * 3;
+            inputs[i].buf  = frame->preprocessed_data;
+            inputs[i].pass_through = 0;
+        }
 
-        int ret = rknn_inputs_set(ctx_, io_num_.n_input, inputs);
+        int ret = rknn_inputs_set(ctx_, io_num_.n_input, inputs.data());
         if (ret < 0) {
             continue;
         }
@@ -234,30 +236,34 @@ void InferenceStage::run() {
             continue;
         }
 
-        // 获取输出
-        memset(outputs, 0, sizeof(outputs));
-        outputs[0].want_float = 1;
-        outputs[0].is_prealloc = 0;
+        // 获取全部输出
+        std::vector<rknn_output> outputs(io_num_.n_output);
+        for (uint32_t i = 0; i < io_num_.n_output; ++i) {
+            outputs[i].want_float = 1;
+            outputs[i].is_prealloc = 0;
+        }
 
-        ret = rknn_outputs_get(ctx_, io_num_.n_output, outputs, nullptr);
+        ret = rknn_outputs_get(ctx_, io_num_.n_output, outputs.data(), nullptr);
         if (ret < 0) {
             continue;
         }
 
-        // 构造 InferenceResult
+        // 构造 InferenceResult：拷贝每个输出及其维度
         InferenceResult result;
         result.frame = frame;
-        result.output_size = output_attrs_[0].n_elems;
-        // 如果 output_attrs_[0].type == FLOAT32，n_elems 就是 float 数
-        // 如果 type == UINT8，需要除 sizeof(float)
-        result.output = (float*)malloc(outputs[0].size);
-        if (result.output) {
-            memcpy(result.output, outputs[0].buf, outputs[0].size);
-            result.output_size = outputs[0].size / sizeof(float);
+        result.outputs.resize(io_num_.n_output);
+        for (uint32_t i = 0; i < io_num_.n_output; ++i) {
+            size_t n_float = outputs[i].size / sizeof(float);
+            result.outputs[i].data.resize(n_float);
+            if (n_float > 0) {
+                std::memcpy(result.outputs[i].data.data(), outputs[i].buf, outputs[i].size);
+            }
+            result.outputs[i].dims.assign(
+                output_attrs_[i].dims, output_attrs_[i].dims + output_attrs_[i].n_dims);
         }
 
         // 释放 RKNN 输出
-        rknn_outputs_release(ctx_, io_num_.n_output, outputs);
+        rknn_outputs_release(ctx_, io_num_.n_output, outputs.data());
 
         // 送入后处理队列
         output_queue_->push(result);

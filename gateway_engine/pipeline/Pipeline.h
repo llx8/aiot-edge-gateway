@@ -10,6 +10,7 @@
 #include <atomic>
 #include <deque>
 #include <chrono>
+#include <mutex>
 
 namespace gateway_engine {
 
@@ -52,6 +53,8 @@ private:
     std::atomic<float> current_fps_{0.0f}; // 当前帧率
 
     std::deque<std::chrono::steady_clock::time_point> latency_samples_;
+    mutable std::mutex latency_mutex_;          // 保护 latency_samples_（写:PostprocessStage线程, 读:外部线程）
+    std::recursive_mutex stage_mutex_;           // 保护 stage unique_ptr（start/stop 嵌套调用需递归锁）
     static constexpr int kMaxLatencySamples = 30;
 };
 

@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 
 EventLoop* g_event_loop = nullptr;
@@ -138,7 +139,8 @@ int main(){
     db_writer.start();
 
     OfflineStore offline_store(db_path);
-    bool need_flush = false;
+    // 跨线程访问：MQTT 回调线程写 true，主线程 eventfd 回调读+写 false，须原子
+    std::atomic<bool> need_flush{false};
 
     MqttClient mqtt(config["mqtt"]["broker_url"], config["mqtt"]["client_id"],
                 "spBv1.0/edge_gateway/DBIRTH/gw001");
@@ -325,6 +327,11 @@ int main(){
     int rule_periodic_counter = 0;
     int64_t total_packets = 0;
 
+    // 持久共享内存状态：ShmBlock 是复合状态对象，publish() 整块替换共享内存，
+    // 故必须维护持久副本增量更新各字段；若每次事件都 new 一个零初始化块再 publish，
+    // 后到的发布会把前面事件设的字段清零（如传感器数据 publish 会清掉 ai_engine_online）。
+    ShmBlock shm_block{};
+
     rpc_handler.register_method("get_device_health", [&](const std::string& payload){
         // 读取 CPU 使用率（/proc/stat 第一行）
         float cpu_usage = -1.0f;
@@ -396,20 +403,20 @@ int main(){
                 }
                 // 同步 AI 指标到共享内存
                 if (msg.payload.size() >= 8) {
-                    ShmBlock ai_block{};
-                    ai_block.total_packets = total_packets;
-                    ai_block.ai_engine_online = 1;
-                    std::memcpy(&ai_block.inference_fps, msg.payload.data(), 4);
-                    std::memcpy(&ai_block.npu_temp_c, msg.payload.data() + 4, 4);
-                    shm_publisher.publish(ai_block);
+                    shm_block.total_packets = total_packets;
+                    shm_block.ai_engine_online = 1;
+                    std::memcpy(&shm_block.inference_fps, msg.payload.data(), 4);
+                    std::memcpy(&shm_block.npu_temp_c, msg.payload.data() + 4, 4);
+                    shm_publisher.publish(shm_block);
                 }
             } else if (msg.tlv_type == 0x07) {
                 // JPEG 快照：直接转发给 monitor 进程
                 auto encoded = encode_internal_msg(msg);
                 event_loop.send_to_monitor(encoded.data(), encoded.size());
-                ShmBlock block{};
-                block.snapshot_jpeg_len = static_cast<int32_t>(msg.payload.size());
-                shm_publisher.publish(block);
+                shm_block.total_packets = total_packets;
+                shm_block.snapshot_jpeg_len = static_cast<int32_t>(msg.payload.size());
+                shm_block.last_detection_ts = static_cast<uint32_t>(time(nullptr));
+                shm_publisher.publish(shm_block);
             } else if (msg.tlv_type == 0x04) {
                 auto fusion_result = event_fusion.evaluate(msg);
                 if (fusion_result.has_value()) {
@@ -443,6 +450,54 @@ int main(){
                     } else {
                         offline_store.insert(alarm_topic, record.data, 1);  // 告警优先
                     }
+
+                    // 设计:291 多源复合告警 -> SQLite + MQTT + 共享内存
+                    shm_block.total_packets = total_packets;
+                    shm_block.total_alarms++;
+                    shm_block.alarm_active = 1;
+                    shm_block.last_detection_ts = static_cast<uint32_t>(time(nullptr));
+                    std::string alarm_desc = "AI复合告警 node=" + std::to_string(msg.node_id)
+                        + " sev=" + std::to_string(severity);
+                    std::strncpy(shm_block.last_alarm, alarm_desc.c_str(),
+                                 sizeof(shm_block.last_alarm));
+                    shm_block.last_alarm[sizeof(shm_block.last_alarm) - 1] = '\0';
+                    shm_publisher.publish(shm_block);
+                }
+            } else if (msg.tlv_type == 0x13) {
+                // 模型切换 ACK：引擎已成功加载新模型（设计:366）
+                logger->info("引擎模型切换 ACK (node={})", msg.node_id);
+                ota_manager.on_model_switch_ack(msg.node_id);
+            } else if (msg.tlv_type == 0x14) {
+                // 模型切换 NACK：引擎已回滚旧模型，发布告警（设计:367）
+                std::string reason(msg.payload.begin(), msg.payload.end());
+                logger->warn("引擎模型切换 NACK (node={}): {}", msg.node_id, reason);
+                ota_manager.on_model_switch_nack(msg.node_id, reason);
+                // 额外发布 MQTT 告警
+                std::string nack_alarm = "模型切换失败 node=" + std::to_string(msg.node_id)
+                    + " reason=" + reason;
+                if (mqtt.is_connected()) {
+                    mqtt.publish("spBv1.0/edge_gateway/DALARM/gw001", nack_alarm);
+                } else {
+                    offline_store.insert("spBv1.0/edge_gateway/DALARM/gw001", nack_alarm, 1);
+                }
+            } else if (msg.tlv_type == 0xFE) {
+                // FATAL 错误上报：引擎新旧模型均加载失败等致命错误（设计:218,378）
+                // 原实现命中末尾 return 被静默丢弃，FATAL 级错误完全被忽略
+                std::string reason(msg.payload.begin(), msg.payload.end());
+                logger->error("引擎 FATAL (node={}): {}", msg.node_id, reason);
+                DbRecord record;
+                record.type = DbOpType::ALARM;
+                record.source_type = msg.source_type;
+                record.node_id = msg.node_id;
+                record.tlv_type = msg.tlv_type;
+                record.data = reason;
+                db_writer.push(record);
+                std::string fatal_alarm = "引擎FATAL node=" + std::to_string(msg.node_id)
+                    + " reason=" + reason;
+                if (mqtt.is_connected()) {
+                    mqtt.publish("spBv1.0/edge_gateway/DALARM/gw001", fatal_alarm);
+                } else {
+                    offline_store.insert("spBv1.0/edge_gateway/DALARM/gw001", fatal_alarm, 1);
                 }
             }
             return;
@@ -460,9 +515,9 @@ int main(){
 
         rule_engine.evaluate(msg);
 
-        ShmBlock block{};
-        block.total_packets = total_packets;
-        shm_publisher.publish(block);
+        shm_block.total_packets = total_packets;
+        shm_block.mqtt_connected = mqtt.is_connected() ? 1 : 0;
+        shm_publisher.publish(shm_block);
 
         std::string payload_str(msg.payload.begin(), msg.payload.end());
         std::string data_topic = "spBv1.0/edge_gateway/DDATA/gw001";

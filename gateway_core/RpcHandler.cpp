@@ -29,11 +29,13 @@ std::string RpcHandler::dispatch(const std::string& payload) {
         if (seen_ids_.count(req_id)) {
             return "NACK: duplicate request id";
         }
-        // 防止内存膨胀
+        // 防止内存膨胀：FIFO 逐出最旧条目，而非全部清空（全部清空会打开重放窗口）
         if (seen_ids_.size() >= kMaxSeenIds) {
-            seen_ids_.clear();
+            seen_ids_.erase(id_order_.front());
+            id_order_.pop_front();
         }
         seen_ids_.insert(req_id);
+        id_order_.push_back(req_id);
     }
 
     // 匹配注册的 handler
