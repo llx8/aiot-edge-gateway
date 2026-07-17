@@ -1,5 +1,6 @@
 #include "AnalysisScheduler.h"
 #include "InternalMessage.h"
+#include "Logger.h"
 #include <unistd.h>
 #include <sys/socket.h>
 #include <cstdint>
@@ -34,6 +35,7 @@ void AnalysisScheduler::run() {
 
         // 3. 判断是什么指令
         if (result.msg.tlv_type == CMD_START_ANALYSIS) {
+            GetLogger("gateway_engine")->info("AnalysisScheduler: received START_ANALYSIS");
             // 解析 payload 中的 camera/model 参数
             std::string payload_str(result.msg.payload.begin(), result.msg.payload.end());
             std::string model_path;

@@ -26,11 +26,18 @@ std::vector<int32_t> EngineManager::check_timeout() {
     std::vector<int32_t> timed_out;
     auto now = std::chrono::steady_clock::now();
 
-    for (const auto& [node_id, info] : heartbeats_) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - info.last_beat).count();
-        if (elapsed > HEARTBEAT_TIMEOUT_MS) {
-            timed_out.push_back(node_id);
-            GetLogger("EngineManager")->warn("进程 E 心跳超时: node={}, 已过 {}ms", node_id, elapsed);
+    for (auto it = heartbeats_.begin(); it != heartbeats_.end(); ) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second.last_beat).count();
+        if (elapsed > HEARTBEAT_TIMEOUT_MS * 2) {
+            // 超时超过 60s，清理残留节点
+            GetLogger("EngineManager")->info("清理过期节点: node={}", it->first);
+            it = heartbeats_.erase(it);
+        } else if (elapsed > HEARTBEAT_TIMEOUT_MS) {
+            timed_out.push_back(it->first);
+            GetLogger("EngineManager")->warn("进程 E 心跳超时: node={}, 已过 {}ms", it->first, elapsed);
+            ++it;
+        } else {
+            ++it;
         }
     }
 
@@ -62,4 +69,16 @@ int EngineManager::seconds_since_last_heartbeat(int32_t node_id) const {
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - it->second.last_beat).count();
     return static_cast<int>(elapsed);
+}
+
+int EngineManager::online_count() const {
+    int count = 0;
+    auto now = std::chrono::steady_clock::now();
+    for (const auto& [node_id, info] : heartbeats_) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - info.last_beat).count();
+        if (elapsed <= HEARTBEAT_TIMEOUT_MS) {
+            count++;
+        }
+    }
+    return count;
 }

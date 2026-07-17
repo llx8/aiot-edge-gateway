@@ -52,7 +52,11 @@ void ShmPublisher::publish(const ShmBlock& block) {
     // 通知qt
     if (notify_fd_ >= 0) {
         uint64_t val = 1;
-        write(notify_fd_, &val, sizeof(val));
+        ssize_t ret = write(notify_fd_, &val, sizeof(val));
+        if (ret != sizeof(val)) {
+            GetLogger("gateway")->warn("write eventfd failed: fd={} ret={} errno={}",
+                notify_fd_, ret, strerror(errno));
+        }
     }
 }
 

@@ -48,6 +48,7 @@ void HeartbeatReporter::send_heartbeat() {
 
     InternalMessage msg;
     msg.source_type = 3;
+    msg.node_id = 0;
     msg.tlv_type = 0x05;
     msg.payload.resize(8);
     memcpy(msg.payload.data(), &fps, 4);

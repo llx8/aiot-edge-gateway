@@ -80,7 +80,9 @@ void HttpDashboard::server_thread(int port, int shm_key) {
 }
 
 void HttpDashboard::handle_client(int client_fd, int shm_key) {
-    // 只读 HTTP 请求第一行（GET /path HTTP/1.x）
+    struct timeval tv{5, 0};
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     std::array<char, 1024> buf{};
     ssize_t n = read(client_fd, buf.data(), buf.size() - 1);
     if (n <= 0) return;

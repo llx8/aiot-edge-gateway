@@ -23,60 +23,72 @@ std::optional<InternalMessage> EventFusion::evaluate(const InternalMessage& msg)
     if (msg.source_type == 3) {
         if (msg.payload.size() < 4) return std::nullopt;
 
+        constexpr size_t DET_SIZE = 24;
+
+        // 兼容两种格式:
+        //   批量格式: [4B num] + [num * DET_SIZE]
+        //   单检测格式: 直接就是 [DET_SIZE] 一个 Detection
         int32_t num;
         std::memcpy(&num, msg.payload.data(), 4);
 
-        constexpr size_t DET_SIZE = 24;
+        // 试探性判断：如果不是批量格式（payload_size != 4 + num*DET_SIZE），按单检测处理
+        bool is_batch = (msg.payload.size() == 4 + static_cast<size_t>(num) * DET_SIZE);
 
         // 第一遍扫描：收集本帧中所有检测框的 class_id
         std::unordered_set<int> present_classes;
-        for (int32_t i = 0; i < num; i++) {
-            size_t off = 4 + i * DET_SIZE;
-            if (off + DET_SIZE > msg.payload.size()) break;
-            int class_id;
-            std::memcpy(&class_id, msg.payload.data() + off + 20, 4);
-            present_classes.insert(class_id);
+        auto collect_classes = [&](const uint8_t* data, int32_t count) {
+            for (int32_t i = 0; i < count; i++) {
+                int class_id;
+                std::memcpy(&class_id, data + i * DET_SIZE + 20, 4);
+                present_classes.insert(class_id);
+            }
+        };
+
+        if (is_batch) {
+            collect_classes(msg.payload.data() + 4, num);
+        } else {
+            // 单检测格式：整个 payload 就是一个 Detection
+            num = 1;
+            collect_classes(msg.payload.data(), 1);
         }
 
         int max_severity = 0;
 
-        for (int32_t i = 0; i < num; i++) {
-            size_t off = 4 + i * DET_SIZE;
-            if (off + DET_SIZE > msg.payload.size()) break;
-
+        auto process_det = [&](const uint8_t* data, const FusionRule& rule) -> bool {
             int class_id;
-            std::memcpy(&class_id, msg.payload.data() + off + 20, 4);
+            std::memcpy(&class_id, data + 20, 4);
+            if (rule.ai_class_id != class_id) return false;
 
-            for (const auto& rule : rules_) {
-                if (rule.ai_class_id != class_id) continue;
+            if (rule.requires_co_class >= 0) {
+                if (!present_classes.count(rule.requires_co_class)) return false;
+            }
+            if (rule.excludes_co_class >= 0) {
+                if (present_classes.count(rule.excludes_co_class)) return false;
+            }
 
-                // 跨检测框关联：需要同帧存在某类
-                if (rule.requires_co_class >= 0) {
-                    if (!present_classes.count(rule.requires_co_class)) continue;
-                }
-                // 跨检测框关联：排除同帧存在某类
-                if (rule.excludes_co_class >= 0) {
-                    if (present_classes.count(rule.excludes_co_class)) continue;
-                }
-
-                auto it = sensor_cache_.find(msg.node_id);
-                if (it == sensor_cache_.end()) {
-                    if (!rule.sensor_condition) continue;
-                    if (!rule.sensor_condition(0.0f)) continue;
+            auto it = sensor_cache_.find(msg.node_id);
+            if (it == sensor_cache_.end()) {
+                if (!rule.sensor_condition) return false;
+                if (!rule.sensor_condition(0.0f)) return false;
+            } else {
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - it->second.timestamp).count();
+                if (elapsed > SENSOR_CACHE_TTL_SEC) {
+                    if (!rule.sensor_condition(0.0f)) return false;
                 } else {
-                    // 检查传感器数据是否在时间窗口内（30s TTL）
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::steady_clock::now() - it->second.timestamp).count();
-                    if (elapsed > SENSOR_CACHE_TTL_SEC) {
-                        // 过期数据，跳过此传感器条件
-                        if (!rule.sensor_condition(0.0f)) continue;
-                    } else {
-                        if (!rule.sensor_condition(it->second.value)) continue;
-                    }
+                    if (!rule.sensor_condition(it->second.value)) return false;
                 }
+            }
 
-                if (rule.output_severity > max_severity)
-                    max_severity = rule.output_severity;
+            if (rule.output_severity > max_severity)
+                max_severity = rule.output_severity;
+            return true;
+        };
+
+        for (int32_t i = 0; i < num; i++) {
+            const uint8_t* det_ptr = is_batch ? (msg.payload.data() + 4 + i * DET_SIZE) : msg.payload.data();
+            for (const auto& rule : rules_) {
+                process_det(det_ptr, rule);
             }
         }
 

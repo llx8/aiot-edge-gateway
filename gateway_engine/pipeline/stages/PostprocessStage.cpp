@@ -1,4 +1,5 @@
 #include "PostprocessStage.h"
+#include "Logger.h"
 #include <algorithm>
 #include <chrono>
 #include <thread>
@@ -10,7 +11,7 @@
 namespace gateway_engine {
 
 PostprocessStage::PostprocessStage(
-    PipelineQueue<InferenceResult, 4>* input_queue,
+    PipelineQueue<InferenceResult, 8>* input_queue,
     float conf_threshold, float iou_threshold, int input_size, int jpeg_quality)
     : input_queue_(input_queue), conf_threshold_(conf_threshold),
       iou_threshold_(iou_threshold), input_size_(input_size), jpeg_quality_(jpeg_quality) {}
@@ -103,6 +104,14 @@ void PostprocessStage::run() {
             continue;
         }
 
+        using clock = std::chrono::steady_clock;
+        static auto last_ts = clock::now();
+        auto now = clock::now();
+        auto gap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ts).count();
+        last_ts = now;
+
+        auto t0 = now;
+
         std::vector<Detection> detections;
         std::vector<uint8_t> jpeg_data;
 
@@ -194,15 +203,14 @@ void PostprocessStage::run() {
 
             detections = std::move(nms_result);
 
-            // 有检测结果时生成 JPEG 快照
-            if (!detections.empty()) {
-                jpeg_data = encode_jpeg(result);
-            }
+            jpeg_data = encode_jpeg(result);
         }
 
-        // InferenceResult.outputs 是 vector<float>，自动释放，无需手动 free
-
         if (callback_) {
+            auto proc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count();
+            GetLogger("gateway_engine")->info("gap={}ms proc={}ms det={} jpeg={}KB",
+                gap_ms, proc_ms, detections.size(), jpeg_data.size() / 1024);
             callback_(detections, jpeg_data);
         }
 

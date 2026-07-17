@@ -1,22 +1,29 @@
 #pragma once
 
 #include <QWidget>
-#include "ShmReader.h"
+#include <QString>
+#include <vector>
 
 class QTableWidget;
+
+struct AlarmEntry {
+    int id;
+    QString time;
+    int severity;
+    QString detail;
+};
 
 class AlarmTableWidget : public QWidget {
     Q_OBJECT
 public:
-    // 构造函数，传入ShmReader引用
-    explicit AlarmTableWidget(ShmReader& reader, QWidget* parent = nullptr);
-
-    // 析构函数
+    explicit AlarmTableWidget(QWidget* parent = nullptr);
     ~AlarmTableWidget();
 
-    // 刷新显示数据
-    void refresh();
+    void setAlarms(const std::vector<AlarmEntry>& alarms);
+    void appendAlarms(const std::vector<AlarmEntry>& new_alarms);
+
 private:
-    ShmReader& reader_; // 引用，不负责生命周期
-    QTableWidget* table_; // 显示告警的表格
+    QTableWidget* table_;
+    const char* severityLabel(int sev) const;
+    const char* severityColor(int sev) const;
 };

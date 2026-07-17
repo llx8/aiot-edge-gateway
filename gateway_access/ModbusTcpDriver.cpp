@@ -226,6 +226,6 @@ void ModbusTcpDriver::reconnect() {
 
 #ifndef MODBUS_TCP_STATIC  // 静态链接时跳过(避免 dlopen 工厂函数冲突)
 extern "C" ISensorDriver* create_driver() {
-    return new ModbusTcpDriver("127.0.0.1", 502, 1, 1000, 0, 10);
+    return new ModbusTcpDriver("127.0.0.1", 5020, 1, 1000, 0, 10);
 }
 #endif

@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <sstream>
+#include <sqlite3.h>
 
 EventLoop* g_event_loop = nullptr;
 
@@ -65,6 +66,8 @@ int main(){
 
     RuleEngine rule_engine;
 
+    EngineManager engine_manager;
+
     rule_engine.add_rule([&](const InternalMessage& msg){
         std::string data(msg.payload.begin(), msg.payload.end());
         float temp = 0.0f;
@@ -76,6 +79,8 @@ int main(){
     },
     [&](const InternalMessage& msg){
         logger->warn("高温告警! node={}", msg.node_id);
+        // 事件驱动按需拉流：高温告警触发 AI 视觉确认（设计:198）
+        engine_manager.start_analysis(msg.node_id);
     });
 
     rule_engine.add_rule([&](const InternalMessage& msg) {
@@ -215,6 +220,7 @@ int main(){
     });
 
     rpc_handler.register_method("start_analysis", [&](const std::string& payload){
+        logger->info("RPC start_analysis: payload={}", payload);
         // MQTT params 是 JSON；引擎按 design:207 的 "camera=X model=Y" 格式解析
         std::string camera = extract_json_str(payload, "camera");
         std::string model = extract_json_str(payload, "model");
@@ -279,10 +285,12 @@ int main(){
 
     event_loop.add_external_fd(mqtt.event_fd(), [&](int fd){
         mqtt.publish_birth_if_needed();
+        mqtt.resubscribe_all();
         RpcCommand cmd;
         while (mqtt.try_pop_rpc(cmd)) {
             std::string resp = rpc_handler.dispatch(cmd.payload);
-            mqtt.publish(cmd.topic, resp);
+            // 不发布响应到 DCMD topic（会导致自循环：core 发布 → 自己收到 → 再处理 → 再发布…）
+            logger->info("RPC dispatched: {}", resp);
         }
         if (need_flush && mqtt.is_connected()) {
             offline_store.flush(mqtt);
@@ -293,13 +301,12 @@ int main(){
     ShmPublisher shm_publisher(0x47574D4D);
 
     event_loop.set_fd_received_callback([&](int fd) {
+        logger->info("Received monitor eventfd: {}", fd);
         shm_publisher.set_notify_fd(fd);
     });
 
     EventFusion event_fusion;
     event_fusion.load_rules_from_json("conf/ai_rules.json");
-
-    EngineManager engine_manager;
 
     engine_manager.set_command_sender([&](int32_t node_id, uint8_t cmd) {
         if (engine_cmd_fd < 0) return false;
@@ -330,6 +337,37 @@ int main(){
     // 故必须维护持久副本增量更新各字段；若每次事件都 new 一个零初始化块再 publish，
     // 后到的发布会把前面事件设的字段清零（如传感器数据 publish 会清掉 ai_engine_online）。
     ShmBlock shm_block{};
+
+    // 从 model_version.json 加载模型信息到共享内存
+    {
+        std::ifstream mv_file("models/model_version.json");
+        if (mv_file.is_open()) {
+            std::string content((std::istreambuf_iterator<char>(mv_file)),
+                                std::istreambuf_iterator<char>());
+            auto extract = [&](const std::string& key) -> std::string {
+                auto pos = content.find("\"" + key + "\"");
+                if (pos == std::string::npos) return "";
+                pos = content.find(':', pos);
+                if (pos == std::string::npos) return "";
+                pos = content.find('"', pos);
+                if (pos == std::string::npos) return "";
+                auto end = content.find('"', pos + 1);
+                if (end == std::string::npos) return "";
+                return content.substr(pos + 1, end - pos - 1);
+            };
+            std::string model_name = extract("current_model");
+            std::string version_str = extract("version");
+            std::strncpy(shm_block.last_model_name, model_name.c_str(),
+                         sizeof(shm_block.last_model_name) - 1);
+            if (!version_str.empty()) {
+                std::istringstream iss(version_str);
+                int major = 0;
+                char dot;
+                iss >> major >> dot;
+                shm_block.model_version = major;
+            }
+        }
+    }
 
     rpc_handler.register_method("get_device_health", [&](const std::string& payload){
         // 读取 CPU 使用率（/proc/stat 第一行）
@@ -385,6 +423,62 @@ int main(){
     });
 
     event_loop.set_data_callback([&](int fd, const InternalMessage& msg){
+        // ── monitor → core: 告警历史查询 ──
+        if (msg.tlv_type == TLV_ALARM_QUERY) {
+            // 从 payload 中解析 last_id（首次为 0）
+            int last_id = 0;
+            if (!msg.payload.empty()) {
+                std::string payload_str(msg.payload.begin(), msg.payload.end());
+                try { last_id = std::stoi(payload_str); } catch (...) {}
+            }
+            std::string json = "[";
+            sqlite3* rdb = nullptr;
+            if (sqlite3_open_v2("/tmp/gateway_data.db", &rdb,
+                    SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nullptr) == SQLITE_OK) {
+                const char* sql = "SELECT id, source_type, node_id, detail FROM alarm_log"
+                                  " WHERE id > ? ORDER BY id DESC LIMIT 500;";
+                sqlite3_stmt* stmt = nullptr;
+                if (sqlite3_prepare_v2(rdb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, last_id);
+                    bool first = true;
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        if (!first) json += ",";
+                        first = false;
+                        int id = sqlite3_column_int(stmt, 0);
+                        int st = sqlite3_column_int(stmt, 1);
+                        int nid = sqlite3_column_int(stmt, 2);
+                        const char* detail =
+                            reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+                        std::string esc_detail;
+                        if (detail) {
+                            for (const char* p = detail; *p; ++p) {
+                                if (*p == '"') esc_detail += "\\\"";
+                                else if (*p == '\\') esc_detail += "\\\\";
+                                else if (*p == '\n') esc_detail += "\\n";
+                                else esc_detail += *p;
+                            }
+                        }
+                        json += "{\"id\":" + std::to_string(id)
+                             + ",\"source_type\":" + std::to_string(st)
+                             + ",\"node_id\":" + std::to_string(nid)
+                             + ",\"detail\":\"" + esc_detail + "\"}";
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(rdb);
+            }
+            json += "]";
+
+            InternalMessage resp;
+            resp.source_type = 0;
+            resp.node_id = 0;
+            resp.tlv_type = TLV_ALARM_QUERY_RESPONSE;
+            resp.payload.assign(json.begin(), json.end());
+            auto encoded = encode_internal_msg(resp);
+            event_loop.send_to_monitor(encoded.data(), encoded.size());
+            return;
+        }
+
         if (msg.source_type == 3) {
             engine_cmd_fd = fd;
         } else {
@@ -404,8 +498,47 @@ int main(){
                 if (msg.payload.size() >= 8) {
                     shm_block.total_packets = total_packets;
                     shm_block.ai_engine_online = 1;
+                    shm_block.mqtt_connected = mqtt.is_connected() ? 1 : 0;
                     std::memcpy(&shm_block.inference_fps, msg.payload.data(), 4);
                     std::memcpy(&shm_block.npu_temp_c, msg.payload.data() + 4, 4);
+
+                    // 系统指标
+                    {
+                        std::ifstream uptime_f("/proc/uptime");
+                        float up_sec = 0;
+                        if (uptime_f >> up_sec) shm_block.uptime_sec = static_cast<int64_t>(up_sec);
+                    }
+                    {
+                        std::ifstream stat_f("/proc/stat");
+                        std::string line;
+                        if (std::getline(stat_f, line) && line.find("cpu  ") == 0) {
+                            std::istringstream iss(line.substr(5));
+                            long user, nice, sys, idle, iowait, irq, softirq, steal;
+                            if (iss >> user >> nice >> sys >> idle >> iowait >> irq >> softirq >> steal) {
+                                long total = user + nice + sys + idle + iowait + irq + softirq + steal;
+                                if (total > 0) shm_block.cpu_usage = 100.0f * (total - idle - iowait) / total;
+                            }
+                        }
+                    }
+                    {
+                        std::ifstream mem_f("/proc/meminfo");
+                        std::string line;
+                        long total_kb = 0, avail_kb = 0;
+                        while (std::getline(mem_f, line)) {
+                            if (line.find("MemTotal:") == 0) {
+                                std::istringstream iss(line.substr(9));
+                                iss >> total_kb;
+                            } else if (line.find("MemAvailable:") == 0) {
+                                std::istringstream iss(line.substr(13));
+                                iss >> avail_kb;
+                            }
+                            if (total_kb > 0 && avail_kb > 0) break;
+                        }
+                        if (total_kb > 0) shm_block.mem_usage = 100.0f * (total_kb - avail_kb) / total_kb;
+                    }
+
+                    shm_block.online_nodes = engine_manager.online_count();
+
                     shm_publisher.publish(shm_block);
                 }
             } else if (msg.tlv_type == 0x07) {
@@ -437,15 +570,21 @@ int main(){
                     record.source_type = fusion_result->source_type;
                     record.node_id = fusion_result->node_id;
                     record.tlv_type = fusion_result->tlv_type;
-                    record.data = std::string(fusion_result->payload.begin(),
-                                              fusion_result->payload.end());
+                    // 构建结构化 JSON，含传感器上下文（设计:392）
+                    record.data = "{\"type\":\"compound_alarm\",\"severity\":"
+                        + std::to_string(severity)
+                        + ",\"node_id\":" + std::to_string(msg.node_id)
+                        + ",\"context\":{\"temperature\":"
+                        + std::to_string(shm_block.sensor_temp)
+                        + ",\"humidity\":" + std::to_string(shm_block.sensor_hum)
+                        + "}}";
                     db_writer.push(record);
 
                     std::string alarm_topic = "spBv1.0/edge_gateway/DALARM/gw001";
                     if (mqtt.is_connected()) {
                         mqtt.publish(alarm_topic, record.data);
                     } else {
-                        offline_store.insert(alarm_topic, record.data, 1);  // 告警优先
+                        offline_store.insert(alarm_topic, record.data, 1);
                     }
 
                     // 设计:291 多源复合告警 -> SQLite + MQTT + 共享内存
@@ -511,6 +650,12 @@ int main(){
         db_writer.push(record);
 
         rule_engine.evaluate(msg);
+
+        // 从 Modbus 寄存器提取温湿度到共享内存（设计：实时折线图数据源）
+        if (msg.tlv_type == 0x01 && msg.payload.size() >= 4) {
+            shm_block.sensor_temp = static_cast<float>((msg.payload[0] << 8) | msg.payload[1]) / 10.0f;
+            shm_block.sensor_hum  = static_cast<float>((msg.payload[2] << 8) | msg.payload[3]) / 10.0f;
+        }
 
         shm_block.total_packets = total_packets;
         shm_block.mqtt_connected = mqtt.is_connected() ? 1 : 0;

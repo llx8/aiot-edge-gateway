@@ -24,8 +24,8 @@ struct InferenceResult {
 class InferenceStage : public StageBase {
 public:
     InferenceStage(
-        PipelineQueue<std::shared_ptr<Frame>, 4>* input_queue,
-        PipelineQueue<InferenceResult, 4>* output_queue,
+        PipelineQueue<std::shared_ptr<Frame>, 8>* input_queue,
+        PipelineQueue<InferenceResult, 8>* output_queue,
         const std::string& model_path);
     ~InferenceStage() override;
 
@@ -42,8 +42,8 @@ private:
     bool init_rknn(const std::string& model_path);
     void destroy_rknn();
 
-    PipelineQueue<std::shared_ptr<Frame>, 4>* input_queue_;
-    PipelineQueue<InferenceResult, 4>* output_queue_;
+    PipelineQueue<std::shared_ptr<Frame>, 8>* input_queue_;
+    PipelineQueue<InferenceResult, 8>* output_queue_;
 
     // RKNN 相关
     rknn_context ctx_ = 0;

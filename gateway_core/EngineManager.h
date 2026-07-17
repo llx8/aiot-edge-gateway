@@ -23,6 +23,7 @@ public:
     void stop_analysis(int32_t node_id);
 
     int seconds_since_last_heartbeat(int32_t node_id) const;
+    int online_count() const;
 
 private:
     struct HeartbeatInfo {

@@ -1,4 +1,5 @@
 #include "Pipeline.h"
+#include "Logger.h"
 #include <cstdlib>
 
 namespace gateway_engine {
@@ -40,14 +41,18 @@ void Pipeline::start(std::string model_path) {
     capture_     = std::make_unique<CaptureStage>(cfg_.video_path, cfg_.input_size, pool_.get(), &queue_1_);
     preprocess_  = std::make_unique<PreprocessStage>(&queue_1_, &queue_2_, cfg_.input_size);
     inference_   = std::make_unique<InferenceStage>(&queue_2_, &queue_3_, model_path_);
+    if (fatal_cb_) inference_->set_fatal_callback(fatal_cb_);
     postprocess_ = std::make_unique<PostprocessStage>(&queue_3_, cfg_.conf_threshold, cfg_.iou_threshold, cfg_.input_size, cfg_.jpeg_quality);
     postprocess_->setOnFrameDone([this]{ on_frame_done(); });
+    if (detection_cb_) postprocess_->setCallback(detection_cb_);
 
     // 倒序启动
     postprocess_->start();
     inference_->start();
     preprocess_->start();
     capture_->start();
+
+    GetLogger("gateway_engine")->info("Pipeline started: model={}", model_path_);
 }
 
 void Pipeline::stop() {
@@ -69,12 +74,14 @@ void Pipeline::stop() {
 
 void Pipeline::setCallback(DetectionCallback cb) {
     std::lock_guard<std::recursive_mutex> lock(stage_mutex_);
-    if (postprocess_) postprocess_->setCallback(std::move(cb));
+    detection_cb_ = std::move(cb);
+    if (postprocess_) postprocess_->setCallback(detection_cb_);
 }
 
 void Pipeline::setFatalCallback(std::function<void(const std::string&)> cb) {
     std::lock_guard<std::recursive_mutex> lock(stage_mutex_);
-    if (inference_) inference_->set_fatal_callback(std::move(cb));
+    fatal_cb_ = std::move(cb);
+    if (inference_) inference_->set_fatal_callback(fatal_cb_);
 }
 
 void Pipeline::on_frame_done() {

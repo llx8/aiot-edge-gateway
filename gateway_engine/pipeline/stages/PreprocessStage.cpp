@@ -41,8 +41,8 @@ void resize_bilinear(const uint8_t* src, int src_w, int src_h, uint8_t* dst, int
 }  // namespace
 
 PreprocessStage::PreprocessStage(
-    PipelineQueue<std::shared_ptr<Frame>, 4>* input_queue,
-    PipelineQueue<std::shared_ptr<Frame>, 4>* output_queue,
+    PipelineQueue<std::shared_ptr<Frame>, 8>* input_queue,
+    PipelineQueue<std::shared_ptr<Frame>, 8>* output_queue,
     int input_size)
     : input_queue_(input_queue), output_queue_(output_queue),
       input_size_(input_size) {}

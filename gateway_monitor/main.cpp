@@ -3,13 +3,16 @@
 #include "Logger.h"
 #include <fstream>
 #include <sys/stat.h>
+#include <cstdlib>
 
 int main(int argc, char* argv[]) {
-    // 初始化日志
+    if (!qEnvironmentVariableIsSet("DISPLAY") && !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+
     auto logger = GetLogger("gateway_monitor");
     logger->info("Starting gateway_monitor...");
 
-    // 创建QApplication对象
     QApplication app(argc, argv);
 
     // 创建并显示MonitorWindow

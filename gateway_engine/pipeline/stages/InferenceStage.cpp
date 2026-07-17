@@ -11,8 +11,8 @@
 namespace gateway_engine {
 
 InferenceStage::InferenceStage(
-    PipelineQueue<std::shared_ptr<Frame>, 4>* input_queue,
-    PipelineQueue<InferenceResult, 4>* output_queue,
+    PipelineQueue<std::shared_ptr<Frame>, 8>* input_queue,
+    PipelineQueue<InferenceResult, 8>* output_queue,
     const std::string& model_path)
     : input_queue_(input_queue)
     , output_queue_(output_queue)
@@ -188,15 +188,18 @@ bool InferenceStage::switch_model(const std::string& model_path, const std::stri
 void InferenceStage::run() {
     // 首次加载模型
     if (!init_rknn(model_path_)) {
+        GetLogger("gateway_engine")->error("InferenceStage: init_rknn FAILED, entering sleep loop");
         // 模型加载失败，进入空循环（等待热切换或退出）
         while (running_.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         return;
     }
+    GetLogger("gateway_engine")->info("InferenceStage: model loaded, starting inference loop");
 
     // 准备 rknn_input / rknn_output（按模型实际 IO 数动态分配，原先固定 [1] 数组在
     // 多输出模型如 YOLOv5s(n_output=3) 会栈溢出）
+    int frame_count = 0;
     while (running_.load()) {
         std::shared_ptr<Frame> frame;
         if (!input_queue_->pop(frame)) {
@@ -267,6 +270,10 @@ void InferenceStage::run() {
 
         // 送入后处理队列
         output_queue_->push(result);
+        frame_count++;
+        if (frame_count % 100 == 0) {
+            GetLogger("gateway_engine")->info("InferenceStage: processed {} frames", frame_count);
+        }
     }
 
     destroy_rknn();

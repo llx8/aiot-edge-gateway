@@ -14,10 +14,9 @@ void EventLoop::set_nonblocking(int fd) {
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-EventLoop::EventLoop(const std::vector<std::string>& uds_paths, size_t buffer_size)
+EventLoop::EventLoop(const std::vector<std::string>& uds_paths)
     : uds_paths_(uds_paths)
     , epoll_fd_(-1)
-    , ring_buffer_(buffer_size)
     , running_(false){
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ < 0) {
@@ -90,35 +89,47 @@ void EventLoop::accept_connection(int listen_fd) {
     }
 }
 
-void EventLoop::receive_fd(int fd) {
-    char dummy;
-    struct iovec iov = {&dummy, 1};
-
+ssize_t EventLoop::receive_fd(int fd, std::vector<uint8_t>& raw_data) {
+    raw_data.clear();
+    std::vector<uint8_t> buf(4096);
+    struct iovec iov = {buf.data(), buf.size()};
     char cmsg_buf[CMSG_SPACE(sizeof(int))];
     struct msghdr msg = {};
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
     msg.msg_control = cmsg_buf;
-    msg.msg_controllen = CMSG_SPACE(sizeof(int));
-    
-    if (recvmsg(fd, &msg, 0) < 0) {
-        return;
-    }
+    msg.msg_controllen = sizeof(cmsg_buf);
+
+    ssize_t n = recvmsg(fd, &msg, 0);
+    if (n < 0) return -1;
+    if (n > 0) raw_data.assign(buf.data(), buf.data() + n);
 
     struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-    if (cmsg && cmsg->cmsg_level == SOL_SOCKET 
+    if (cmsg && cmsg->cmsg_level == SOL_SOCKET
         && cmsg->cmsg_type == SCM_RIGHTS) {
         int received_fd = *(int*)CMSG_DATA(cmsg);
         if (fd_received_callback_) {
             fd_received_callback_(received_fd);
         }
     }
+    return n;
 }
 
 std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
     if (monitor_client_fds_.count(client_fd)) {
-        receive_fd(client_fd);
-        return {};
+        // monitor 客户端：首次消息含 SCM_RIGHTS（eventfd），后续消息为常规数据
+        // ET 模式下需循环读到 EAGAIN
+        std::vector<InternalMessage> messages;
+        while (true) {
+            std::vector<uint8_t> raw_data;
+            ssize_t n = receive_fd(client_fd, raw_data);
+            if (n <= 0) break;  // EAGAIN or error
+            auto result = decode_internal_msg(raw_data.data(), static_cast<size_t>(n));
+            if (result.ok) {
+                messages.push_back(std::move(result.msg));
+            }
+        }
+        return messages;
     }
     // SOCK_SEQPACKET 保消息边界：一次 read() = 一条完整 InternalMessage。
     // 1) 读缓冲须容纳最大消息：JPEG 快照可达 200KB+（设计要求 UDS send buffer ≥ 512KB），

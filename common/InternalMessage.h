@@ -10,8 +10,10 @@ constexpr uint8_t CMD_SWITCH_MODEL    = 0x12;
 constexpr uint8_t CMD_MODEL_ACK       = 0x13;
 constexpr uint8_t CMD_MODEL_NACK      = 0x14;
 
-constexpr uint8_t TLV_JPEG_SNAPSHOT = 0x07;  // JPEG 快照
-constexpr uint8_t TLV_FATAL         = 0xFE;  // FATAL 错误上报（0xFF 保留给设备心跳）
+constexpr uint8_t TLV_JPEG_SNAPSHOT       = 0x07;  // JPEG 快照
+constexpr uint8_t TLV_ALARM_QUERY         = 0x20;  // monitor → core: 查询告警历史
+constexpr uint8_t TLV_ALARM_QUERY_RESPONSE = 0x21; // core → monitor: 告警历史响应
+constexpr uint8_t TLV_FATAL               = 0xFE;  // FATAL 错误上报（0xFF 保留给设备心跳）
 
 // 内部消息
 struct InternalMessage {

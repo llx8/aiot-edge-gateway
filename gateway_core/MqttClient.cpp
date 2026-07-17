@@ -41,7 +41,8 @@ void MqttClient::disconnect(){
 // 回调函数
 void MqttClient::connected(const mqtt::string& cause){
     connected_ = true;
-    birth_pending_ = true;  // 连接成功后发布 BIRTH
+    birth_pending_ = true;         // 连接成功后发布 BIRTH
+    needs_resubscribe_ = true;     // 重连后需重新订阅 topic
     if (status_callback_) {
         status_callback_(true);
     }
@@ -63,18 +64,15 @@ void MqttClient::message_arrived(mqtt::const_message_ptr msg){
 }
 
 void MqttClient::delivery_complete(mqtt::delivery_token_ptr token){
-    // 打印日志
-    GetLogger("MqttClient")->info("delivery_complete: {}", token->get_message_id());
+    GetLogger("MqttClient")->debug("delivery_complete: {}", token->get_message_id());
 }
 
 void MqttClient::on_failure(const mqtt::token& token){
-    // 打印日志
     GetLogger("MqttClient")->error("on_failure: {}", token.get_message_id());
 }
 
 void MqttClient::on_success(const mqtt::token& token){
-    // 打印日志
-    GetLogger("MqttClient")->info("on_success: {}", token.get_message_id());
+    GetLogger("MqttClient")->debug("on_success: {}", token.get_message_id());
 }
 
 void MqttClient::notify_main_thread(){
@@ -140,5 +138,15 @@ bool MqttClient::subscribe(const std::string& topic, int qos){
         return false;
     }
     client_->subscribe(topic, qos)->wait();
+    subscriptions_.push_back({topic, qos});  // 记录已订阅，供重连后 resubscribe_all() 重放
     return true;
+}
+
+// 重连后重新订阅全部 topic（主线程调用）
+void MqttClient::resubscribe_all() {
+    if (!needs_resubscribe_.exchange(false)) return;
+    if (!connected_) return;
+    for (const auto& sub : subscriptions_) {
+        client_->subscribe(sub.topic, sub.qos)->wait();
+    }
 }

@@ -39,9 +39,9 @@ private:
     std::string model_path_;
     
     // 三条队列
-    PipelineQueue<std::shared_ptr<Frame>, 4> queue_1_;  
-    PipelineQueue<std::shared_ptr<Frame>, 4> queue_2_;  
-    PipelineQueue<InferenceResult, 4> queue_3_;         
+    PipelineQueue<std::shared_ptr<Frame>, 8> queue_1_;  
+    PipelineQueue<std::shared_ptr<Frame>, 8> queue_2_;  
+    PipelineQueue<InferenceResult, 8> queue_3_;         
 
     // 四个 Stage
     std::unique_ptr<CaptureStage> capture_;
@@ -55,6 +55,8 @@ private:
     std::deque<std::chrono::steady_clock::time_point> latency_samples_;
     mutable std::mutex latency_mutex_;          // 保护 latency_samples_（写:PostprocessStage线程, 读:外部线程）
     std::recursive_mutex stage_mutex_;           // 保护 stage unique_ptr（start/stop 嵌套调用需递归锁）
+    DetectionCallback detection_cb_;             // 持久化回调：setCallback 可能在 start() 之前调用
+    std::function<void(const std::string&)> fatal_cb_; // 同上
     static constexpr int kMaxLatencySamples = 30;
 };
 

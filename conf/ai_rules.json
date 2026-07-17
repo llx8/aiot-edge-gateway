@@ -1,6 +1,12 @@
 {
   "rules": [
     {
+      "name": "运动球体检测",
+      "ai_class_id": 32,
+      "sensor_condition": "true",
+      "severity": 2
+    },
+    {
       "name": "安全帽缺失",
       "ai_class_id": 0,
       "sensor_condition": "true",

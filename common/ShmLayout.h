@@ -23,8 +23,10 @@ struct ShmBlock{
     uint32_t last_detection_ts; // 最后一次检测时间戳
     char last_model_name[64];   // 当前模型名称
     int32_t snapshot_jpeg_len;  // 最后一次快照JPEG长度
+    float sensor_temp;         // 最新传感器温度
+    float sensor_hum;          // 最新传感器湿度
 
-    uint8_t _reserved[128]; // 预留空间，对齐设计文档
+    uint8_t _reserved[120]; // 预留空间，对齐设计文档
 };
 
 static_assert(sizeof(ShmBlock) <= 4096, "ShmBlock 超出页大小");

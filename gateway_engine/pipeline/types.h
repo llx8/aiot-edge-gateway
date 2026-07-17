@@ -41,15 +41,15 @@ struct PipelineConfig {
     // 模型输入尺寸
     int input_size = 640;
     // 置信度阈值
-    float conf_threshold = 0.5f;
+    float conf_threshold = 0.25f;
     // IOU阈值 --- 用于非极大值抑制
     float iou_threshold = 0.5f;
     // SPSC无锁队列容量
-    int queue_capacity = 4;
+    int queue_capacity = 8;
     // 帧内存池大小
-    int frame_pool_size = 6;
+    int frame_pool_size = 18;
     // JPEG 快照质量 (1-100)
-    int jpeg_quality = 75;
+    int jpeg_quality = 90;
 };
 
 // 检测回调：detections + 可选 JPEG 快照

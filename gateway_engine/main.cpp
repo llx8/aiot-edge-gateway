@@ -30,6 +30,14 @@ int main() {
     pid_file << getpid();
     pid_file.close();
 
+    // 自动加入 cgroup（CPU≤60%, 内存≤2GB），失败不阻塞
+    {
+        std::ofstream cprocs("/sys/fs/cgroup/user.slice/user-1000.slice/gateway_engine/cgroup.procs");
+        if (cprocs.is_open()) {
+            cprocs << getpid() << "\n";
+        }
+    }
+
     // 确保模型目录存在
     mkdir("models", 0755);
 
@@ -44,6 +52,7 @@ int main() {
     gateway_engine::PipelineConfig pipe_cfg;
     pipe_cfg.video_path = "video/video.mp4";
     pipe_cfg.model_path = "models/yolov5s.rknn";
+    pipe_cfg.conf_threshold = 0.25f;
 
     gateway_engine::Pipeline pipeline(pipe_cfg);
     pipeline.setFatalCallback([&](const std::string& reason) {

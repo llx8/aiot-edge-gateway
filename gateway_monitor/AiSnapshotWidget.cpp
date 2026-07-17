@@ -7,12 +7,13 @@ AiSnapshotWidget::AiSnapshotWidget(QWidget* parent)
     : QWidget(parent)
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
     image_label_ = new QLabel(this);
     image_label_->setAlignment(Qt::AlignCenter);
-    image_label_->setMinimumSize(320, 240);
+    image_label_->setMinimumSize(400, 300);
+    image_label_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     image_label_->setStyleSheet("background-color: #1e1e1e; border: 1px solid #444;");
     layout->addWidget(image_label_);
-    setLayout(layout);
 }
 
 void AiSnapshotWidget::update_snapshot(const std::vector<uint8_t>& jpeg_data,

@@ -65,7 +65,12 @@ int main(){
 
     logger->info("Config: uds_path={}", uds_path);
 
-    UdsClient uds(uds_path);
+    // 先通知 watchdog 进程已启动（UDS 连接可能因 core 未就绪而阻塞，
+    // 若不先写 ready，watchdog 10s 超时后会 SIGKILL 此进程）
+    mkdir("/tmp/gateway_watchdog", 0755);
+    std::ofstream("/tmp/gateway_watchdog/gateway_access.ready") << "1";
+
+    UdsClient uds(uds_path, 3);
     if (!uds.is_connected()) {
         logger->error("UDS connect failed");
         return 1;
@@ -124,9 +129,6 @@ int main(){
         logger->info("Starting driver: {}", driver->name());
         driver->start();
     }
-
-    mkdir("/tmp/gateway_watchdog", 0755);
-    std::ofstream("/tmp/gateway_watchdog/gateway_access.ready") << "1";
 
     // ── epoll 主循环 ──
     int epfd = epoll_create1(EPOLL_CLOEXEC);

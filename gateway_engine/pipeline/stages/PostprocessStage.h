@@ -12,7 +12,7 @@ namespace gateway_engine {
 class PostprocessStage : public StageBase {
 public:
     PostprocessStage(
-        PipelineQueue<InferenceResult, 4>* input_queue,
+        PipelineQueue<InferenceResult, 8>* input_queue,
         float conf_threshold,
         float iou_threshold,
         int input_size,
@@ -23,13 +23,14 @@ public:
 protected:
     void run() override;
 private:
-    PipelineQueue<InferenceResult, 4>* input_queue_;
+    PipelineQueue<InferenceResult, 8>* input_queue_;
     float conf_threshold_;
     float iou_threshold_;
     int input_size_;
     int jpeg_quality_;
     DetectionCallback callback_;
     std::function<void()> on_frame_done_;
+    std::vector<Detection> pending_detections_;
 
     // JPEG 编码：从 Frame 原始数据生成 JPEG
     std::vector<uint8_t> encode_jpeg(const InferenceResult& result);

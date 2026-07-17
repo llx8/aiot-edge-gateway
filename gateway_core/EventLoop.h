@@ -1,6 +1,5 @@
 #pragma once
 
-#include "RingBuffer.h"
 #include <string>
 #include <vector>
 #include "InternalMessage.h"
@@ -11,7 +10,7 @@
 class EventLoop {
 public:
     // 构造函数：支持多个 UDS 路径
-    explicit EventLoop(const std::vector<std::string>& uds_paths, size_t buffer_size = 65536);
+    explicit EventLoop(const std::vector<std::string>& uds_paths);
 
     // 析构函数
     ~EventLoop();
@@ -39,7 +38,6 @@ private:
     std::vector<std::string> uds_paths_;
     int epoll_fd_;
     std::unordered_set<int> listen_fds_;   // 多个监听 fd
-    RingBuffer ring_buffer_;
     bool running_;
     std::unordered_set<int> client_fds_;
     std::unordered_map<int, FdCallback> fd_callbacks_;
@@ -48,10 +46,10 @@ private:
     std::string monitor_path_;
     std::unordered_set<int> monitor_listen_fds_;
     std::unordered_set<int> monitor_client_fds_;
-    void receive_fd(int client_fd);
+    // 从 monitor 客户端接收消息（含 SCM_RIGHTS fd 处理），返回读取的字节数
+    ssize_t receive_fd(int client_fd, std::vector<uint8_t>& raw_data);
     FdReceivedCallback fd_received_callback_;
     
-    static constexpr size_t kBufferSize = 65536;
     static constexpr int kMaxEvents = 16;
 
     static void set_nonblocking(int fd);

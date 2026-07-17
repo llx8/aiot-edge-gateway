@@ -12,6 +12,7 @@ std::shared_ptr<spdlog::logger> GetLogger(const std::string& name)
     auto logger = std::make_shared<spdlog::logger>(name, spdlog::sinks_init_list{console_sink, file_sink});
     logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
     logger->set_level(spdlog::level::debug);
+    logger->flush_on(spdlog::level::info);  // 即时刷新，防止崩溃丢日志
     spdlog::register_logger(logger);
 
     return logger;

@@ -5,7 +5,18 @@
 
 namespace gateway_engine {
 
-CaptureStage::CaptureStage(const std::string& video_path, int input_size, FramePool* pool, PipelineQueue<std::shared_ptr<Frame>, 4>* output_queue)
+gboolean on_bus_message(GstBus*, GstMessage* msg, gpointer data) {
+    auto* self = static_cast<CaptureStage*>(data);
+    if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS) {
+        self->eos_seen_.store(true);
+        gst_element_seek(self->pipeline_, 1.0, GST_FORMAT_TIME,
+                         static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_SEGMENT),
+                         GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+    }
+    return TRUE;
+}
+
+CaptureStage::CaptureStage(const std::string& video_path, int input_size, FramePool* pool, PipelineQueue<std::shared_ptr<Frame>, 8>* output_queue)
     : video_path_(video_path)
     , input_size_(input_size)
     , pool_(pool)
@@ -54,8 +65,13 @@ bool CaptureStage::build_pipeline() {
         return false;
     }
     appsink_ = GST_APP_SINK(sink);
-    gst_app_sink_set_max_buffers(appsink_, 2);
-    gst_app_sink_set_drop(appsink_, true);
+    gst_app_sink_set_max_buffers(appsink_, 4);
+    gst_app_sink_set_drop(appsink_, false);
+
+    eos_seen_.store(false);
+    GstBus* bus = gst_element_get_bus(pipeline_);
+    gst_bus_add_watch(bus, on_bus_message, this);
+    gst_object_unref(bus);
 
     GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
@@ -81,6 +97,9 @@ void CaptureStage::run() {
 
         GstSample* sample = gst_app_sink_pull_sample(appsink_);
         if (!sample) {
+            if (eos_seen_.exchange(false)) {
+                continue;
+            }
             destroy_pipeline();
             std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
             reconnect_delay_ms = std::min(reconnect_delay_ms * 2, kMaxReconnectDelayMs);
