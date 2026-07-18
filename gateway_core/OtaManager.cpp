@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cstdio>
 #include <sys/stat.h>
+#include <thread>
 
 OtaManager::OtaManager(const std::string& model_dir, const std::string& db_path)
     : model_dir_(model_dir)
@@ -139,33 +140,41 @@ std::string OtaManager::handle_ota_update(const std::string& payload) {
 
     std::string dest_path = model_dir_ + "/" + model_name;
 
-    logger->info("OTA: downloading {} -> {}", url, dest_path);
+    logger->info("OTA: downloading {} -> {} (async)", url, dest_path);
 
-    if (!download_model(url, dest_path)) {
-        return "NACK: download failed";
-    }
+    // 同步下载会阻塞 EventLoop 主线程，导致 access/engine 数据堆积。
+    // 改为独立线程下载 + 校验 + 通知，handle_ota_update 立即返回。
+    std::thread([this, url, expected_sha256, model_name, version, dest_path]() {
+        auto lg = GetLogger("OtaManager");
+        if (!download_model(url, dest_path)) {
+            lg->error("OTA: download failed");
+            if (status_reporter_) status_reporter_("NACK: OTA download failed");
+            return;
+        }
+        if (!verify_sha256(dest_path, expected_sha256)) {
+            lg->error("OTA: SHA256 mismatch, removing {}", dest_path);
+            std::remove(dest_path.c_str());
+            if (status_reporter_) status_reporter_("NACK: OTA SHA256 verification failed");
+            return;
+        }
+        lg->info("OTA: SHA256 verified, notifying engine to switch");
+        {
+            std::lock_guard<std::mutex> lk(pending_mutex_);
+            pending_ = PendingOta{model_name, version, expected_sha256, dest_path};
+        }
+        if (!notify_engine_switch(dest_path, expected_sha256)) {
+            std::lock_guard<std::mutex> lk(pending_mutex_);
+            pending_.reset();
+            if (status_reporter_) status_reporter_("NACK: failed to notify engine");
+        }
+    }).detach();
 
-    if (!verify_sha256(dest_path, expected_sha256)) {
-        logger->error("OTA: SHA256 mismatch, removing {}", dest_path);
-        std::remove(dest_path.c_str());
-        return "NACK: SHA256 verification failed";
-    }
-
-    logger->info("OTA: SHA256 verified, notifying engine to switch");
-
-    if (!notify_engine_switch(dest_path, expected_sha256)) {
-        return "NACK: failed to notify engine";
-    }
-
-    // 设计:365-367 — B 必须等 E 的 ACK 才记录版本
-    // 先保存 pending 状态，收到引擎 ACK 后再 save_version + 报告成功
-    pending_ = PendingOta{model_name, version, expected_sha256, dest_path};
-
-    return "ACK: model switch sent, waiting for engine confirmation";
+    return "ACK: download started, will notify engine on success";
 }
 
 void OtaManager::on_model_switch_ack(int32_t node_id) {
     (void)node_id;
+    std::lock_guard<std::mutex> lk(pending_mutex_);
     if (!pending_) return;
     auto logger = GetLogger("OtaManager");
     logger->info("引擎模型切换 ACK，记录版本: {}", pending_->model_name);
@@ -178,6 +187,7 @@ void OtaManager::on_model_switch_ack(int32_t node_id) {
 
 void OtaManager::on_model_switch_nack(int32_t node_id, const std::string& reason) {
     (void)node_id;
+    std::lock_guard<std::mutex> lk(pending_mutex_);
     if (!pending_) return;
     auto logger = GetLogger("OtaManager");
     logger->error("引擎模型切换 NACK: {}，清理下载文件", reason);

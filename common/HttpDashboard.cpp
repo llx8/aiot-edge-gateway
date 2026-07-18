@@ -53,7 +53,11 @@ bool HttpDashboard::start(int port, int shm_key) {
 
 void HttpDashboard::stop() {
     running_ = false;
+    // 单独 close(listen_fd_) 不保证唤醒阻塞在 accept() 的 server_thread，
+    // POSIX 不强制要求另一线程 close 同一 fd 能唤醒 accept。shutdown(SHUT_RDWR) 会让
+    // 阻塞 accept 返回并 errno=EINVAL/EINVAL；多调用一次确保唤醒，再 close。
     if (listen_fd_ >= 0) {
+        shutdown(listen_fd_, SHUT_RDWR);
         close(listen_fd_);
         listen_fd_ = -1;
     }
@@ -212,8 +216,10 @@ std::string HttpDashboard::read_shm_metrics(int shm_key) {
     json << "\"ai_engine_online\":" << block.ai_engine_online << ",";
     json << "\"model_version\":" << block.model_version << ",";
     json << "\"last_detection_ts\":" << block.last_detection_ts << ",";
-    json << "\"last_alarm\":\"" << json_escape(block.last_alarm) << "\",";
-    json << "\"last_model_name\":\"" << json_escape(block.last_model_name) << "\"";
+    json << "\"sensor_temp\":" << block.sensor_temp << ",";
+    json << "\"sensor_hum\":" << block.sensor_hum << ",";
+    json << "\"last_alarm\":\"" << json_escape(std::string(block.last_alarm, strnlen(block.last_alarm, sizeof(block.last_alarm)))) << "\",";
+    json << "\"last_model_name\":\"" << json_escape(std::string(block.last_model_name, strnlen(block.last_model_name, sizeof(block.last_model_name)))) << "\"";
     json << "}";
     return json.str();
 }

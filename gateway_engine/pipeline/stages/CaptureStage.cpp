@@ -1,4 +1,5 @@
 #include "CaptureStage.h"
+#include "Logger.h"
 #include <cstring>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
@@ -41,6 +42,10 @@ std::string CaptureStage::make_pipeline_str() const {
 
 void CaptureStage::destroy_pipeline() {
     if (pipeline_) {
+        if (bus_watch_id_ > 0) {
+            g_source_remove(bus_watch_id_);
+            bus_watch_id_ = 0;
+        }
         gst_element_set_state(pipeline_, GST_STATE_NULL);
         gst_object_unref(pipeline_);
         pipeline_ = nullptr;
@@ -70,7 +75,7 @@ bool CaptureStage::build_pipeline() {
 
     eos_seen_.store(false);
     GstBus* bus = gst_element_get_bus(pipeline_);
-    gst_bus_add_watch(bus, on_bus_message, this);
+    bus_watch_id_ = gst_bus_add_watch(bus, on_bus_message, this);
     gst_object_unref(bus);
 
     GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
@@ -113,7 +118,11 @@ void CaptureStage::run() {
         }
 
         GstMapInfo map;
-        gst_buffer_map(buffer, &map, GST_MAP_READ);
+        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+            GetLogger("CaptureStage")->warn("gst_buffer_map failed, skip frame");
+            gst_sample_unref(sample);
+            continue;
+        }
 
         auto frame = pool_->get_frame();
         if (frame) {

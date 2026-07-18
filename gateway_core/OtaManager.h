@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <chrono>
+#include <mutex>
 
 class OtaManager {
 public:
@@ -42,4 +43,5 @@ private:
         std::string dest_path;  // 失败时用于清理下载文件
     };
     std::optional<PendingOta> pending_;
+    std::mutex pending_mutex_;
 };

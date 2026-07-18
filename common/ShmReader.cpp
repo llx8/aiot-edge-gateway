@@ -1,6 +1,7 @@
 #include "ShmReader.h"
 #include <sys/shm.h>
 #include "Logger.h"
+#include <unistd.h>
 
 ShmReader::ShmReader(key_t key)
     : shmid_(-1)
@@ -40,18 +41,28 @@ ShmReader::~ShmReader() {
 bool ShmReader::read(ShmBlock& block) {
     if (!ptr_) return false;
 
-    // 读取当前索引
-    uint32_t idx = ptr_->read_index.load(std::memory_order_acquire);
-    // 防御：read_index 仅合法取值 0/1，异常值（共享内存未初始化/损坏）时
-    // 不能越界访问 buffers[]（构造函数已记录过该情况，此处兜底）
-    if (idx > 1) {
-        return false;
+    // seqlock 读端：重试若干次直到读到一致状态。
+    // 写端在写入 buffers[idx] 前后翻转 seq 奇偶；若读端发现写入中（奇）或前后不一致，则重试。
+    for (int retry = 0; retry < 4; ++retry) {
+        uint32_t idx = ptr_->read_index.load(std::memory_order_acquire);
+        if (idx > 1) return false;
+
+        uint32_t s1 = ptr_->seq[idx].load(std::memory_order_acquire);
+        if (s1 & 1u) {  // 写入中
+            usleep(50);
+            continue;
+        }
+        block = ptr_->buffers[idx];
+        std::atomic_thread_fence(std::memory_order_acquire);
+        uint32_t s2 = ptr_->seq[idx].load(std::memory_order_acquire);
+        if (s1 == s2 && (s2 & 1u) == 0) {
+            last_read_index_ = idx;
+            return true;
+        }
+        // 不一致：被写端插入，重试
     }
-    // 更新last_read_index_
-    last_read_index_ = idx;
-    // 拷贝数据
-    block = ptr_->buffers[idx];
-    return true;
+    // 重试用尽（极少触发）：放弃本次读取，保留上一次数据
+    return false;
 }
 
 // 检查数据是否有更新

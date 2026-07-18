@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/mnt/ssd/GitHub/aiot-edge-gateway/build/gateway_watchdog/gateway_watchdog
-WorkingDirectory=/mnt/ssd/GitHub/aiot-edge-gateway
+ExecStart=/home/ubuntu/gateway/build/gateway_watchdog/gateway_watchdog
+WorkingDirectory=/home/ubuntu/gateway
 User=ubuntu
 Restart=always
 RestartSec=3

@@ -95,13 +95,16 @@ bool MqttClient::try_pop_rpc(RpcCommand& cmd){
 }
 
 bool MqttClient::publish(const std::string& topic, const std::string& payload, int qos){
-    if (!connected_) {
+    if (!connected_) return false;
+    try {
+        auto msg = mqtt::make_message(topic, payload);
+        msg->set_qos(qos);
+        client_->publish(msg)->wait();
+        return true;
+    } catch (const std::exception& e) {
+        GetLogger("MqttClient")->error("publish failed: {}", e.what());
         return false;
     }
-    auto msg = mqtt::make_message(topic, payload);
-    msg->set_qos(qos);
-    client_->publish(msg)->wait();
-    return true;
 }
 
 // 连接
@@ -134,19 +137,25 @@ bool MqttClient::publish_birth_if_needed() {
 
 // 订阅主题
 bool MqttClient::subscribe(const std::string& topic, int qos){
-    if (!connected_) {
+    if (!connected_) return false;
+    try {
+        client_->subscribe(topic, qos)->wait();
+    } catch (const std::exception& e) {
+        GetLogger("MqttClient")->error("subscribe failed: {}", e.what());
         return false;
     }
-    client_->subscribe(topic, qos)->wait();
-    subscriptions_.push_back({topic, qos});  // 记录已订阅，供重连后 resubscribe_all() 重放
+    subscriptions_.push_back({topic, qos});
     return true;
 }
 
-// 重连后重新订阅全部 topic（主线程调用）
 void MqttClient::resubscribe_all() {
     if (!needs_resubscribe_.exchange(false)) return;
     if (!connected_) return;
     for (const auto& sub : subscriptions_) {
-        client_->subscribe(sub.topic, sub.qos)->wait();
+        try {
+            client_->subscribe(sub.topic, sub.qos)->wait();
+        } catch (const std::exception& e) {
+            GetLogger("MqttClient")->error("resubscribe {} failed: {}", sub.topic, e.what());
+        }
     }
 }

@@ -3,11 +3,16 @@
 #include "AlarmTableWidget.h"
 #include "SensorChartWidget.h"
 #include "AiSnapshotWidget.h"
+#include "NodePanel.h"
+#include "HistoryPanel.h"
 #include "Logger.h"
 #include "InternalMessage.h"
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QStackedWidget>
+#include <QPushButton>
+#include <QButtonGroup>
 #include <QStatusBar>
 #include <QFrame>
 #include <QLabel>
@@ -31,9 +36,13 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     chart_ = new SensorChartWidget(this);
     ai_snapshot_ = new AiSnapshotWidget(this);
     alarm_table_ = new AlarmTableWidget(this);
+    node_panel_ = new NodePanel(*reader_, this);
+    history_panel_ = new HistoryPanel(this);
 
-    // ── 左侧上下三段：卡片 → 折线图 → 告警列表 ──
+    // ── 左侧上下三段：卡片 → 折线图 → Tab页(告警/节点/历史) ──
     auto* left_panel = new QWidget(this);
+    // 左侧比例不能被某个 tab 的内容最小宽度劫持；否则 NodePanel 长文本会把 splitter 顶飞
+    left_panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     auto* left_layout = new QVBoxLayout(left_panel);
     left_layout->setContentsMargins(4, 4, 2, 4);
     left_layout->setSpacing(4);
@@ -56,20 +65,46 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     chart_lay->addWidget(chart_title);
     chart_lay->addWidget(chart_);
 
-    // 告警列表
-    auto* alarm_frame = new QFrame(left_panel);
-    alarm_frame->setStyleSheet(
-        "QFrame{background:#161b22; border:1px solid #30363d; border-radius:6px;}");
-    auto* alarm_lay = new QVBoxLayout(alarm_frame);
-    alarm_lay->setContentsMargins(4, 4, 4, 4);
-    auto* alarm_title = new QLabel("Alarm Log", alarm_frame);
-    alarm_title->setStyleSheet("font-size:10px; color:#8b949e; border:none;");
-    alarm_lay->addWidget(alarm_title);
-    alarm_lay->addWidget(alarm_table_);
+    // Tab 按钮栏 + StackedWidget
+    auto* tab_bar = new QFrame(left_panel);
+    tab_bar->setStyleSheet("QFrame{background:#21262d; border:1px solid #30363d; border-radius:6px 6px 0 0;}");
+    auto* tab_lay = new QHBoxLayout(tab_bar);
+    tab_lay->setContentsMargins(0, 0, 0, 0);
+    tab_lay->setSpacing(0);
+
+    auto* stack = new QStackedWidget(left_panel);
+    stack->setStyleSheet("QStackedWidget{background:#161b22; border:1px solid #30363d; border-top:none; border-radius:0 0 6px 6px;}");
+    stack->addWidget(alarm_table_);
+    stack->addWidget(node_panel_);
+    stack->addWidget(history_panel_);
+
+    auto* btn_group = new QButtonGroup(this);
+    btn_group->setExclusive(true);
+
+    auto make_tab_btn = [&](const QString& text, int index) {
+        auto* btn = new QPushButton(text, tab_bar);
+        btn->setCheckable(true);
+        btn->setStyleSheet(
+            "QPushButton{background:#21262d; color:#8b949e; border:none; border-bottom:2px solid transparent;"
+            "padding:6px 16px; font-size:11px;}"
+            "QPushButton:checked{color:#58a6ff; border-bottom:2px solid #58a6ff;}"
+            "QPushButton:hover{color:#c9d1d9;}");
+        btn_group->addButton(btn, index);
+        tab_lay->addWidget(btn);
+        QObject::connect(btn, &QPushButton::clicked, [stack, index]{ stack->setCurrentIndex(index); });
+        return btn;
+    };
+
+    auto* btn_alarm = make_tab_btn("Alarm Log", 0);
+    auto* btn_node  = make_tab_btn("Node Mgmt", 1);
+    auto* btn_hist  = make_tab_btn("History", 2);
+    btn_alarm->setChecked(true);
+    tab_lay->addStretch();
 
     left_layout->addWidget(card_section, 0);
     left_layout->addWidget(chart_frame, 1);
-    left_layout->addWidget(alarm_frame, 1);
+    left_layout->addWidget(tab_bar, 0);
+    left_layout->addWidget(stack, 1);
 
     // ── 右侧：AI 检测画面 + 底部状态 ──
     auto* right_panel = new QWidget(this);
@@ -105,6 +140,17 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     splitter->addWidget(right_panel);
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
+    splitter->setCollapsible(0, false);
+    splitter->setCollapsible(1, false);
+
+    for (auto* btn : {btn_alarm, btn_node, btn_hist}) {
+        QObject::connect(btn, &QPushButton::clicked, [splitter] {
+            QTimer::singleShot(0, [splitter] {
+                int total = splitter->width();
+                if (total > 200) splitter->setSizes({total / 2, total / 2});
+            });
+        });
+    }
 
     setCentralWidget(splitter);
     setWindowTitle("AIoT Edge Gateway Monitor");
@@ -151,8 +197,10 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     }
 
     // 3. 挂 QSocketNotifier
-    notifier_ = new QSocketNotifier(notify_fd_, QSocketNotifier::Read, this);
-    connect(notifier_, SIGNAL(activated(int)), this, SLOT(onShmNotify()));
+    if (notify_fd_ >= 0) {
+        notifier_ = new QSocketNotifier(notify_fd_, QSocketNotifier::Read, this);
+        connect(notifier_, SIGNAL(activated(int)), this, SLOT(onShmNotify()));
+    }
 
     // 4. QTimer 定时刷新仪表盘
     refresh_timer_ = new QTimer(this);
@@ -163,14 +211,22 @@ MonitorWindow::MonitorWindow(QWidget* parent)
     alarm_query_timer_ = new QTimer(this);
     connect(alarm_query_timer_, SIGNAL(timeout()), this, SLOT(onAlarmQuery()));
     alarm_query_timer_->start(2000);
+
+    // 6. HistoryPanel 查询
+    connect(history_panel_, &HistoryPanel::query_requested, this, &MonitorWindow::sendHistoryQuery);
 }
 
 MonitorWindow::~MonitorWindow() {
-    ::close(notify_fd_);
+    // 先禁用 QSocketNotifier，避免 Qt 事件队列中还有 queued 的 activated(int) 信号
+    // 在 fd close 后被派发，槽函数对已关闭 fd 做 read() 导致 EBADF/数据错乱
+    if (notifier_) notifier_->setEnabled(false);
+    if (uds_notifier_) uds_notifier_->setEnabled(false);
+    if (notify_fd_ >= 0) ::close(notify_fd_);
     if (uds_fd_ >= 0) ::close(uds_fd_);
 }
 
 void MonitorWindow::onShmNotify() {
+    if (notify_fd_ < 0) return;
     uint64_t val;
     ::read(notify_fd_, &val, sizeof(val));
 }
@@ -180,6 +236,20 @@ void MonitorWindow::onTimerRefresh() {
     ShmBlock block;
     if (reader_->read(block)) {
         chart_->update_value(block.sensor_temp, block.sensor_hum);
+        node_panel_->refresh();
+
+        static int64_t last_append_sec = 0;
+        int64_t now = QDateTime::currentSecsSinceEpoch();
+        if (now != last_append_sec) {
+            last_append_sec = now;
+            HistoryEntry e;
+            e.ts = now;
+            e.type = "sensor";
+            e.temp = block.sensor_temp;
+            e.hum = block.sensor_hum;
+            e.detail = QString("T:%1 H:%2").arg(block.sensor_temp, 0, 'f', 1).arg(block.sensor_hum, 0, 'f', 1);
+            history_panel_->append_entry(e);
+        }
     }
 }
 
@@ -263,6 +333,12 @@ void MonitorWindow::onUdsData() {
         return;
     }
 
+    // 历史数据查询响应
+    if (result.msg.tlv_type == TLV_HISTORY_RESPONSE) {
+        handleHistoryResponse(result.msg.payload);
+        return;
+    }
+
     // JPEG 快照
     if (result.msg.tlv_type == 0x07 && !result.msg.payload.empty()) {
         std::vector<QRect> boxes;
@@ -295,5 +371,40 @@ void MonitorWindow::onUdsData() {
                 ai_snapshot_->update_snapshot(jpeg_data, boxes, labels);
             }
         }
+    }
+}
+
+void MonitorWindow::sendHistoryQuery(int64_t start_ts, int64_t end_ts) {
+    if (uds_fd_ < 0) return;
+    std::string json = "{\"start_ts\":" + std::to_string(start_ts)
+                     + ",\"end_ts\":" + std::to_string(end_ts) + "}";
+    InternalMessage msg;
+    msg.source_type = 0;
+    msg.node_id = 0;
+    msg.tlv_type = TLV_HISTORY_QUERY;
+    msg.payload.assign(json.begin(), json.end());
+    auto encoded = encode_internal_msg(msg);
+    ::write(uds_fd_, encoded.data(), encoded.size());
+}
+
+void MonitorWindow::handleHistoryResponse(const std::vector<uint8_t>& payload) {
+    QByteArray json_data(reinterpret_cast<const char*>(payload.data()),
+                         static_cast<int>(payload.size()));
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(json_data, &err);
+    if (err.error != QJsonParseError::NoError) return;
+    if (!doc.isArray()) return;
+
+    history_panel_->clear();
+    for (const auto& val : doc.array()) {
+        if (!val.isObject()) continue;
+        auto obj = val.toObject();
+        HistoryEntry e;
+        e.ts = obj["ts"].toVariant().toLongLong();
+        e.type = obj["type"].toString();
+        e.temp = static_cast<float>(obj["temp"].toDouble());
+        e.hum = static_cast<float>(obj["hum"].toDouble());
+        e.detail = obj["detail"].toString();
+        history_panel_->append_entry(e);
     }
 }

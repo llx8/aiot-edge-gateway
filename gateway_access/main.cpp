@@ -1,4 +1,5 @@
 #include "Logger.h"
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <string>
@@ -22,10 +23,10 @@
 #include <sys/signalfd.h>
 #include <poll.h>
 
-static volatile sig_atomic_t g_running = 1;
+static std::atomic<sig_atomic_t> g_running{1};
 
 void signal_handler(int signum) {
-    g_running = 0;
+    g_running.store(0);
 }
 
 // ── eventfd 桥接：消息队列 ──
@@ -41,16 +42,27 @@ static int g_wakeup_efd = -1;
 static std::string extract_json_str(const std::string& json, const std::string& key) {
     auto pos = json.find("\"" + key + "\"");
     if (pos == std::string::npos) return "";
-    auto start = json.find('"', pos + key.size() + 2) + 1;
+    auto val_start = json.find('"', pos + key.size() + 2);
+    if (val_start == std::string::npos) return "";
+    auto start = val_start + 1;
     auto end = json.find('"', start);
-    if (start == std::string::npos || end == std::string::npos) return "";
+    if (end == std::string::npos) return "";
     return json.substr(start, end - start);
 }
 
 static int extract_json_int(const std::string& json, const std::string& key, int default_val = 0) {
-    auto s = extract_json_str(json, key);
-    if (s.empty()) return default_val;
-    try { return std::stoi(s); } catch (...) { return default_val; }
+    auto pos = json.find("\"" + key + "\"");
+    if (pos == std::string::npos) return default_val;
+    auto colon = json.find(':', pos + key.size() + 2);
+    if (colon == std::string::npos) return default_val;
+    size_t i = colon + 1;
+    while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r')) ++i;
+    if (i >= json.size()) return default_val;
+    size_t start = i;
+    if (json[i] == '-' || json[i] == '+') ++i;
+    if (i >= json.size() || !std::isdigit(static_cast<unsigned char>(json[i]))) return default_val;
+    while (i < json.size() && std::isdigit(static_cast<unsigned char>(json[i]))) ++i;
+    try { return std::stoi(json.substr(start, i - start)); } catch (...) { return default_val; }
 }
 
 int main(){
@@ -59,6 +71,7 @@ int main(){
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGPIPE, SIG_IGN);  // socket/pipe write 失败走 EPIPE，不能被默认动作杀进程
 
     auto config = load_config("conf/gateway.conf");
     std::string uds_path = config["uds"]["data_path"];
@@ -88,8 +101,8 @@ int main(){
 
     // 数据回调工厂：Modbus 线程 push 队列 + write(eventfd) → 主线程 epoll 消费后写 UDS
     // （不再在 Modbus 线程中直接写 UDS，避免 UDS 满阻塞采集）
-    auto make_data_callback = [](int efd) {
-        return [efd](const InternalMessage& msg) {
+    auto make_data_callback = [&logger](int efd) {
+        return [efd, logger](const InternalMessage& msg) {
             PendingMsg pm;
             pm.encoded = encode_internal_msg(msg);
             {
@@ -97,7 +110,10 @@ int main(){
                 g_msg_queue.push(std::move(pm));
             }
             uint64_t cnt = 1;
-            ::write(efd, &cnt, sizeof(cnt));
+            ssize_t written = ::write(efd, &cnt, sizeof(cnt));
+            if (written != sizeof(cnt)) {
+                logger->error("eventfd write failed: {}", written < 0 ? strerror(errno) : "short write");
+            }
         };
     };
 
@@ -122,7 +138,19 @@ int main(){
     }
 
     if (drivers.empty()) {
-        logger->info("no .so plugins found, nothing to start");
+        logger->info("no .so plugins found, starting built-in drivers");
+
+        auto rtu = std::make_unique<ModbusRtuDriver>(
+            "/dev/ttyUSB0", 1, 1000, 0, 10);
+        rtu->set_data_callback(make_data_callback(g_wakeup_efd));
+        drivers.push_back(std::move(rtu));
+
+        auto tcp = std::make_unique<ModbusTcpDriver>(
+            "127.0.0.1", 5020, 1, 1000, 0, 10);
+        tcp->set_data_callback(make_data_callback(g_wakeup_efd));
+        drivers.push_back(std::move(tcp));
+
+        logger->info("Built-in drivers added: Modbus-RTU + Modbus-TCP");
     }
 
     for (auto& driver : drivers) {
@@ -170,7 +198,7 @@ int main(){
 
     logger->info("Entering epoll loop (eventfd bridge active)");
 
-    while (g_running) {
+    while (g_running.load()) {
         struct epoll_event events[8];
         int nfds = epoll_wait(epfd, events, 8, 1000);
         if (nfds < 0) {
@@ -186,7 +214,7 @@ int main(){
                 struct signalfd_siginfo siginfo;
                 ssize_t rn = read(sigfd, &siginfo, sizeof(siginfo));
                 (void)rn;
-                g_running = 0;
+                g_running.store(0);
                 break;
             }
 
@@ -205,7 +233,11 @@ int main(){
                     }
                 }
                 for (auto& pm : batch) {
-                    uds.write(pm.encoded.data(), pm.encoded.size());
+                    ssize_t wr = uds.write(pm.encoded.data(), pm.encoded.size());
+                    if (wr != static_cast<ssize_t>(pm.encoded.size())) {
+                        logger->error("UDS write failed: {}/{} bytes",
+                            wr, pm.encoded.size());
+                    }
                 }
                 continue;
             }
@@ -214,7 +246,21 @@ int main(){
                 // UDS 可读：处理进程 B 的 RPC 指令
                 uint8_t buf[4096];
                 ssize_t n = read(uds.fd(), buf, sizeof(buf));
-                if (n <= 0) continue;
+                // n==0 表示对端 clean shutdown；errno 表连接 reset。
+                // 原实现 `if (n <= 0) continue;` 在 LT 模式下会让 fd 一直可读，
+                // epoll_wait 立即返回 → 死循环 100% CPU busy-spin。
+                // 这里改为退出本进程，让 watchdog 1s 后重新拉起并重连 UDS。
+                if (n == 0) {
+                    logger->warn("UDS peer (core) closed, exiting for watchdog restart");
+                    g_running.store(0);
+                    break;
+                }
+                if (n < 0 && (errno == EPIPE || errno == ENOTCONN || errno == ECONNRESET)) {
+                    logger->warn("UDS connection reset, exiting for watchdog restart: {}", strerror(errno));
+                    g_running.store(0);
+                    break;
+                }
+                if (n < 0) continue;  // EAGAIN/EINTR
 
                 auto result = decode_internal_msg(buf, n);
                 if (!result.ok) continue;
@@ -248,6 +294,28 @@ int main(){
                     int reg_start = extract_json_int(payload_str, "reg_start", 0);
                     int reg_count = extract_json_int(payload_str, "reg_count", 10);
                     int tcp_port = extract_json_int(payload_str, "tcp_port", 502);
+
+                    // W9: 范围校验——防止远程配错生成广播 RTU 帧（slave_id=255）或非法 reg_count
+                    if (slave_id < 1 || slave_id > 247) {
+                        logger->warn("add_modbus_device: invalid slave_id {} (1-247)", slave_id);
+                        continue;
+                    }
+                    if (interval < 100 || interval > 60000) {
+                        logger->warn("add_modbus_device: invalid interval {} (100-60000)", interval);
+                        continue;
+                    }
+                    if (reg_start < 0 || reg_start > 65535) {
+                        logger->warn("add_modbus_device: invalid reg_start {}", reg_start);
+                        continue;
+                    }
+                    if (reg_count < 1 || reg_count > 125) {
+                        logger->warn("add_modbus_device: invalid reg_count {} (1-125)", reg_count);
+                        continue;
+                    }
+                    if (tcp_port < 1 || tcp_port > 65535) {
+                        logger->warn("add_modbus_device: invalid tcp_port {}", tcp_port);
+                        continue;
+                    }
 
                     std::unique_ptr<ISensorDriver> new_driver;
                     if (dev_type == "rtu") {

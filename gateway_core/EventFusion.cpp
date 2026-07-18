@@ -33,6 +33,9 @@ std::optional<InternalMessage> EventFusion::evaluate(const InternalMessage& msg)
 
         // 试探性判断：如果不是批量格式（payload_size != 4 + num*DET_SIZE），按单检测处理
         bool is_batch = (msg.payload.size() == 4 + static_cast<size_t>(num) * DET_SIZE);
+        // 防御：单检测格式要求 payload 至少 DET_SIZE 字节；不然下面
+        // collect_classes/process_det 会读到 payload 之外的内存。
+        if (!is_batch && msg.payload.size() < DET_SIZE) return std::nullopt;
 
         // 第一遍扫描：收集本帧中所有检测框的 class_id
         std::unordered_set<int> present_classes;

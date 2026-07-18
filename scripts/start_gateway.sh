@@ -11,7 +11,7 @@ echo "============================================"
 
 # ── 1. 清理残留 ──
 echo "[1/9] 清理残留进程..."
-pkill -f "gateway_" 2>/dev/null || true
+pkill -f "build/gateway_" 2>/dev/null || true
 pkill -f "mock_modbus" 2>/dev/null || true
 pkill -f "socat.*vmodbus" 2>/dev/null || true
 pkill -f "Xvfb" 2>/dev/null || true
@@ -71,16 +71,16 @@ echo "[6/9] 设置 cgroups 资源隔离..."
 sudo bash "$PROJECT_DIR/scripts/setup_cgroups.sh" on 2>&1 | sed 's/^/      /'
 sleep 0.5
 
-# ── 6. 启动 Watchdog ──
-echo "[7/9] 启动 Watchdog..."
-nohup ./build/gateway_watchdog/gateway_watchdog > /tmp/watchdog.log 2>&1 &
-sleep 2
-
-# ── 7. Modbus TCP 模拟器 ──
-echo "[8/9] 启动 Modbus TCP 模拟器..."
+# ── 6. Modbus TCP 模拟器（须早于 Watchdog，否则 access 连接 5020 时 mock 未就绪）──
+echo "[7/9] 启动 Modbus TCP 模拟器..."
 python3 -u "$PROJECT_DIR/tools/mock_modbus_tcp_sensor.py" --port 5020 \
     > /tmp/mock_tcp.log 2>&1 &
 sleep 1
+
+# ── 7. 启动 Watchdog ──
+echo "[8/9] 启动 Watchdog..."
+nohup ./build/gateway_watchdog/gateway_watchdog > /tmp/watchdog.log 2>&1 &
+sleep 2
 
 # ── 8. 等待就绪 + 触发 AI ──
 echo "[9/9] 等待就绪并触发 AI 分析..."

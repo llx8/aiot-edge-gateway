@@ -8,11 +8,11 @@ for name in gateway_monitor gateway_access gateway_engine gateway_core gateway_w
 done
 
 sleep 0.5
-pkill -9 -f "gateway_" 2>/dev/null || true
+pkill -9 -f "build/gateway_" 2>/dev/null || true
 pkill -9 -f "mock_modbus" 2>/dev/null || true
 pkill -9 -f "socat.*vmodbus" 2>/dev/null || true
 
-rm -f /tmp/gateway_data.sock /tmp/gateway_engine.sock /tmp/gateway_data.db
+rm -f /tmp/gateway_data.sock /tmp/gateway_engine.sock /tmp/gateway_monitor.sock
 rm -f /tmp/vmodbus_master /tmp/vmodbus_slave
 rm -f /tmp/mock_rtu.log /tmp/mock_tcp.log /tmp/watchdog.log /tmp/socat.log
 rm -f /tmp/mock_rtu.pid /tmp/mock_tcp.pid /tmp/watchdog.pid /tmp/socat.pid

@@ -24,10 +24,11 @@
 #include <cstring>
 #include <sstream>
 #include <sqlite3.h>
+#include <thread>
 
 EventLoop* g_event_loop = nullptr;
 
-static bool send_uds_cmd(int fd, int32_t node_id, uint8_t tlv_type, const std::string& payload_str) {
+static bool send_uds_cmd(int& fd, int32_t node_id, uint8_t tlv_type, const std::string& payload_str) {
     if (fd < 0) return false;
     InternalMessage msg;
     msg.source_type = 3;
@@ -36,16 +37,49 @@ static bool send_uds_cmd(int fd, int32_t node_id, uint8_t tlv_type, const std::s
     msg.payload.assign(payload_str.begin(), payload_str.end());
     auto encoded = encode_internal_msg(msg);
     ssize_t n = ::write(fd, encoded.data(), encoded.size());
+    // 写失败且 errno 表明连接已断：清掉缓存的 fd，
+    // 否则下次 fd 复用后会误发到无关客户端（如 monitor）
+    if (n < 0 && (errno == EPIPE || errno == EBADF || errno == ENOTCONN || errno == ECONNRESET)) {
+        fd = -1;
+        return false;
+    }
     return n == (ssize_t)encoded.size();
 }
 
 static std::string extract_json_str(const std::string& json, const std::string& key) {
     auto pos = json.find("\"" + key + "\"");
     if (pos == std::string::npos) return "";
-    auto start = json.find('"', pos + key.size() + 2) + 1;
+    auto val_start = json.find('"', pos + key.size() + 2);
+    if (val_start == std::string::npos) return "";
+    auto start = val_start + 1;
     auto end = json.find('"', start);
-    if (start == std::string::npos || end == std::string::npos) return "";
+    if (end == std::string::npos) return "";
     return json.substr(start, end - start);
+}
+
+static int extract_json_int(const std::string& json, const std::string& key, int default_val = 0) {
+    auto pos = json.find("\"" + key + "\"");
+    if (pos == std::string::npos) return default_val;
+    auto colon = json.find(':', pos + key.size() + 2);
+    if (colon == std::string::npos) return default_val;
+    size_t i = colon + 1;
+    while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r')) ++i;
+    if (i >= json.size()) return default_val;
+    size_t start = i;
+    if (json[i] == '-' || json[i] == '+') ++i;
+    if (i >= json.size() || !std::isdigit(static_cast<unsigned char>(json[i]))) return default_val;
+    while (i < json.size() && std::isdigit(static_cast<unsigned char>(json[i]))) ++i;
+    try { return std::stoi(json.substr(start, i - start)); } catch (...) { return default_val; }
+}
+
+static float safe_stof(const std::string& s, float default_val = 0.0f) {
+    if (s.empty()) return default_val;
+    try { return std::stof(s); } catch (...) { return default_val; }
+}
+
+static int safe_stoi(const std::string& s, int default_val = 0) {
+    if (s.empty()) return default_val;
+    try { return std::stoi(s); } catch (...) { return default_val; }
 }
 
 int main(){
@@ -63,6 +97,8 @@ int main(){
 
     int engine_cmd_fd = -1;
     int access_cmd_fd = -1;
+    // 引擎重连后自动恢复分析所用的上次参数
+    std::string last_analysis_payload;
 
     RuleEngine rule_engine;
 
@@ -73,7 +109,7 @@ int main(){
         float temp = 0.0f;
         if (data.find("temp=") != std::string::npos) {
             auto pos = data.find("temp=") + 5;
-            temp = std::stof(data.substr(pos));
+            temp = safe_stof(data.substr(pos));
         }
         return temp > temp_max.load();
     },
@@ -87,8 +123,8 @@ int main(){
         std::string data(msg.payload.begin(), msg.payload.end());
         float hum = 0.0f;
         if (data.find("hum=") != std::string::npos) {
-            auto pos = data.find("hum=") + 5;
-            hum = std::stof(data.substr(pos));
+            auto pos = data.find("hum=") + 4;
+            hum = safe_stof(data.substr(pos));
         }
         return hum > hum_max.load();
     },
@@ -137,6 +173,7 @@ int main(){
         // 回退到传统 signal（兼容旧内核）
         signal(SIGINT, [](int){ if (g_event_loop) g_event_loop->stop(); });
         signal(SIGTERM, [](int){ if (g_event_loop) g_event_loop->stop(); });
+        signal(SIGPIPE, SIG_IGN);  // MQTT/UDS write 失败不能杀进程
     }
 
     DbWriter db_writer(db_path);
@@ -164,12 +201,15 @@ int main(){
 
     OtaManager ota_manager("models", db_path);
 
+    // 持久共享内存状态（在 RPC handler 前声明，确保 lambda 能捕获）
+    ShmBlock shm_block{};
+
     RpcHandler rpc_handler;
 
     rpc_handler.register_method("get_temp", [&](const std::string& payload){
         std::ostringstream oss;
-        oss << "{\"temp_current\":" << temp_max.load()
-            << ",\"hum_current\":" << hum_max.load() << "}";
+        oss << "{\"temp_current\":" << shm_block.sensor_temp
+            << ",\"hum_current\":" << shm_block.sensor_hum << "}";
         return oss.str();
     });
 
@@ -204,6 +244,10 @@ int main(){
                 int interval = std::stoi(interval_str);
                 if (interval < 100 || interval > 60000)
                     return "NACK: interval_ms 超出范围 [100, 60000]";
+            } else {
+                int interval = extract_json_int(payload, "interval_ms", -1);
+                if (interval != -1 && (interval < 100 || interval > 60000))
+                    return "NACK: interval_ms 超出范围 [100, 60000]";
             }
         } catch (...) { return "NACK: invalid interval_ms"; }
         if (!send_uds_cmd(access_cmd_fd, 0, 0x20, payload)) {
@@ -232,19 +276,20 @@ int main(){
         if (!camera.empty()) uds_payload += "camera=" + camera + " ";
         if (!model.empty())  uds_payload += "model=" + model;
         // 两者都为空时引擎用默认模型
+        last_analysis_payload = uds_payload;
         if (!send_uds_cmd(engine_cmd_fd, 0, 0x10, uds_payload)) {
-            return "NACK: engine not connected";
+            return "NACK: engine not connected, will retry on reconnect";
         }
         return "ACK";
     });
 
     rpc_handler.register_method("stop_analysis", [&](const std::string& payload){
-        // design:211: "STOP_ANALYSIS camera=zone_A"
         std::string camera = extract_json_str(payload, "camera");
         std::string uds_payload = camera.empty() ? std::string() : ("camera=" + camera);
         if (!send_uds_cmd(engine_cmd_fd, 0, 0x11, uds_payload)) {
             return "NACK: engine not connected";
         }
+        last_analysis_payload.clear();
         return "ACK";
     });
 
@@ -293,8 +338,14 @@ int main(){
             logger->info("RPC dispatched: {}", resp);
         }
         if (need_flush && mqtt.is_connected()) {
-            offline_store.flush(mqtt);
+            // 同步 flush 会逐条 publish->wait() 等 MQTT ACK，主循环在这里停摆数秒，
+            // 期间 access/engine 数据堆积、心跳超时误判。改为独立线程做 flush。
             need_flush = false;
+            std::thread([&mqtt, &offline_store, &logger]{
+                logger->info("OfflineStore flush started (background)");
+                offline_store.flush(mqtt);
+                logger->info("OfflineStore flush done (background)");
+            }).detach();
         }
     });
 
@@ -316,6 +367,10 @@ int main(){
         msg.tlv_type = cmd;
         auto encoded = encode_internal_msg(msg);
         ssize_t n = ::write(engine_cmd_fd, encoded.data(), encoded.size());
+        if (n < 0 && (errno == EPIPE || errno == EBADF || errno == ENOTCONN || errno == ECONNRESET)) {
+            engine_cmd_fd = -1;
+            return false;
+        }
         return n == (ssize_t)encoded.size();
     });
 
@@ -333,10 +388,7 @@ int main(){
     int rule_periodic_counter = 0;
     int64_t total_packets = 0;
 
-    // 持久共享内存状态：ShmBlock 是复合状态对象，publish() 整块替换共享内存，
-    // 故必须维护持久副本增量更新各字段；若每次事件都 new 一个零初始化块再 publish，
-    // 后到的发布会把前面事件设的字段清零（如传感器数据 publish 会清掉 ai_engine_online）。
-    ShmBlock shm_block{};
+    // ShmBlock 已在前面声明并零初始化
 
     // 从 model_version.json 加载模型信息到共享内存
     {
@@ -422,6 +474,11 @@ int main(){
         return oss.str();
     });
 
+    event_loop.set_disconnect_callback([&](int fd){
+        if (fd == engine_cmd_fd) engine_cmd_fd = -1;
+        if (fd == access_cmd_fd) access_cmd_fd = -1;
+    });
+
     event_loop.set_data_callback([&](int fd, const InternalMessage& msg){
         // ── monitor → core: 告警历史查询 ──
         if (msg.tlv_type == TLV_ALARM_QUERY) {
@@ -433,7 +490,7 @@ int main(){
             }
             std::string json = "[";
             sqlite3* rdb = nullptr;
-            if (sqlite3_open_v2("/tmp/gateway_data.db", &rdb,
+            if (sqlite3_open_v2(db_path.c_str(), &rdb,
                     SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nullptr) == SQLITE_OK) {
                 const char* sql = "SELECT id, source_type, node_id, detail FROM alarm_log"
                                   " WHERE id > ? ORDER BY id DESC LIMIT 500;";
@@ -479,8 +536,76 @@ int main(){
             return;
         }
 
+        // ── monitor → core: 历史数据查询 ──
+        if (msg.tlv_type == TLV_HISTORY_QUERY) {
+            std::string payload_str(msg.payload.begin(), msg.payload.end());
+            // 解析 start_ts/end_ts
+            int64_t start_ts = 0, end_ts = 0;
+            try {
+                auto s_str = extract_json_str(payload_str, "start_ts");
+                auto e_str = extract_json_str(payload_str, "end_ts");
+                if (!s_str.empty()) start_ts = std::stoll(s_str);
+                if (!e_str.empty()) end_ts = std::stoll(e_str);
+            } catch (...) {}
+
+            std::string json = "[";
+            sqlite3* hdb = nullptr;
+            if (sqlite3_open_v2(db_path.c_str(), &hdb,
+                    SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nullptr) == SQLITE_OK) {
+                const char* sql =
+                    "SELECT id, source_type, data FROM sensor_data"
+                    " WHERE id BETWEEN ? AND ? ORDER BY id DESC LIMIT 300;";
+                sqlite3_stmt* stmt = nullptr;
+                if (sqlite3_prepare_v2(hdb, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int64(stmt, 1, start_ts > 0 ? start_ts : 1);
+                    sqlite3_bind_int64(stmt, 2, end_ts > 0 ? end_ts : 999999);
+                    bool first = true;
+                    while (sqlite3_step(stmt) == SQLITE_ROW) {
+                        if (!first) json += ",";
+                        first = false;
+                        int64_t id = sqlite3_column_int64(stmt, 0);
+                        const char* data = reinterpret_cast<const char*>(
+                            sqlite3_column_text(stmt, 2));
+                        float temp = 0, hum = 0;
+                        if (data) {
+                            std::string ds(data);
+                            auto tp = ds.find("temp=");
+                            if (tp != std::string::npos)
+                                temp = safe_stof(ds.substr(tp + 5));
+                            auto hp = ds.find("hum=");
+                            if (hp != std::string::npos)
+                                hum = safe_stof(ds.substr(hp + 4));
+                        }
+                        json += "{\"ts\":" + std::to_string(id)
+                             + ",\"type\":\"sensor\""
+                             + ",\"temp\":" + std::to_string(temp)
+                             + ",\"hum\":" + std::to_string(hum)
+                             + ",\"detail\":\"" + (data ? data : "") + "\"}";
+                    }
+                    sqlite3_finalize(stmt);
+                }
+                sqlite3_close(hdb);
+            }
+            json += "]";
+
+            InternalMessage resp;
+            resp.source_type = 0;
+            resp.node_id = 0;
+            resp.tlv_type = TLV_HISTORY_RESPONSE;
+            resp.payload.assign(json.begin(), json.end());
+            auto encoded = encode_internal_msg(resp);
+            event_loop.send_to_monitor(encoded.data(), encoded.size());
+            return;
+        }
+
         if (msg.source_type == 3) {
+            bool is_new_connection = (engine_cmd_fd != fd);
             engine_cmd_fd = fd;
+            // 引擎崩溃后被 watchdog 拉起重连时，自动补发 start_analysis 恢复推理
+            if (is_new_connection && !last_analysis_payload.empty()) {
+                send_uds_cmd(engine_cmd_fd, 0, 0x10, last_analysis_payload);
+                logger->info("引擎重连，自动恢复分析: {}", last_analysis_payload);
+            }
         } else {
             access_cmd_fd = fd;
         }
@@ -680,7 +805,7 @@ int main(){
     });
 
     HttpDashboard http_dashboard;
-    int http_port = std::stoi(config["http"]["port"].empty() ? "8080" : config["http"]["port"]);
+    int http_port = safe_stoi(config["http"]["port"].empty() ? "8080" : config["http"]["port"], 8080);
     if (!http_dashboard.start(http_port, 0x47574D4D)) {
         logger->warn("HTTP 仪表盘启动失败，不影响主流程");
     }

@@ -7,14 +7,27 @@
 #include <cstring>
 #include <jpeglib.h>
 #include <cstdio>
+#include <csetjmp>
 
 namespace gateway_engine {
+
+struct jpeg_error_mgr_ex {
+    struct jpeg_error_mgr pub;
+    jmp_buf setjmp_buffer;
+};
+
+static void jpeg_error_exit(j_common_ptr cinfo) {
+    auto* err = reinterpret_cast<jpeg_error_mgr_ex*>(cinfo->err);
+    (*err->pub.output_message)(cinfo);
+    longjmp(err->setjmp_buffer, 1);
+}
 
 PostprocessStage::PostprocessStage(
     PipelineQueue<InferenceResult, 8>* input_queue,
     float conf_threshold, float iou_threshold, int input_size, int jpeg_quality)
     : input_queue_(input_queue), conf_threshold_(conf_threshold),
-      iou_threshold_(iou_threshold), input_size_(input_size), jpeg_quality_(jpeg_quality) {}
+      iou_threshold_(iou_threshold), input_size_(input_size), jpeg_quality_(jpeg_quality),
+      last_ts_(std::chrono::steady_clock::now()) {}
 
 void PostprocessStage::setCallback(DetectionCallback cb) {
     callback_ = std::move(cb);
@@ -46,13 +59,22 @@ std::vector<uint8_t> PostprocessStage::encode_jpeg(const InferenceResult& result
 
     auto& frame = *result.frame;
     struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
+    jpeg_error_mgr_ex jerr;
 
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_compress(&cinfo);
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = jpeg_error_exit;
 
     unsigned char* outbuf = nullptr;
     unsigned long outlen = 0;
+
+    if (setjmp(jerr.setjmp_buffer)) {
+        jpeg_destroy_compress(&cinfo);
+        free(outbuf);
+        return {};
+    }
+
+    jpeg_create_compress(&cinfo);
+
     jpeg_mem_dest(&cinfo, &outbuf, &outlen);
 
     cinfo.image_width = frame.width;
@@ -105,10 +127,9 @@ void PostprocessStage::run() {
         }
 
         using clock = std::chrono::steady_clock;
-        static auto last_ts = clock::now();
         auto now = clock::now();
-        auto gap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ts).count();
-        last_ts = now;
+        auto gap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ts_).count();
+        last_ts_ = now;
 
         auto t0 = now;
 
@@ -126,7 +147,10 @@ void PostprocessStage::run() {
                 // dims=[1,255,H,W]，H/W 为网格尺寸
                 int grid_h = static_cast<int>(out.dims[2]);
                 int grid_w = static_cast<int>(out.dims[3]);
+                // grid_h/grid_w == 0 时除零 SIGFPE（RKNN 返回畸形 dims 时可能触发）
+                if (grid_h <= 0 || grid_w <= 0) continue;
                 int stride = input_size_ / grid_h;
+                if (stride <= 0) continue;
                 const int* anchor = nullptr;
                 for (const auto& as : kAnchors) {
                     if (as.stride == stride) { anchor = as.anchor; break; }

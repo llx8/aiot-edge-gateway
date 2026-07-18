@@ -11,7 +11,12 @@ Pipeline::Pipeline(const PipelineConfig& cfg)
     , queue_3_(OverflowPolicy::Block)   // OverflowPolicy::Block
 {}
 
-Pipeline::~Pipeline() {}
+Pipeline::~Pipeline() {
+    // 必须显式 stop() 再让 unique_ptr 按声明逆序销毁 stages：
+    // postprocess_ 先析构后 queue_3_ 再没人 pop，inference_ 析构时 stop() 的 join 会
+    // 卡在 Block 策略的 push 上死锁。这里兜底保证退出路径稳。
+    stop();
+}
 
 void Pipeline::start(std::string model_path) {
     stop();

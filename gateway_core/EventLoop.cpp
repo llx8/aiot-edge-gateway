@@ -26,6 +26,7 @@ EventLoop::EventLoop(const std::vector<std::string>& uds_paths)
 
 EventLoop::~EventLoop() {
     for (auto fd : listen_fds_) close(fd);
+    for (auto fd : monitor_listen_fds_) close(fd);
     if (epoll_fd_ >= 0) close(epoll_fd_);
     for (auto fd : client_fds_) close(fd);
     for (auto fd : monitor_client_fds_) close(fd);
@@ -153,6 +154,7 @@ std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
             continue;  // 继续读，直到 EAGAIN（ET 模式不能提前 break，否则丢数据）
         }
         else if (n == 0) {
+            if (disconnect_callback_) disconnect_callback_(client_fd);
             close(client_fd);
             epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
             client_fds_.erase(client_fd);
@@ -176,10 +178,10 @@ std::vector<InternalMessage> EventLoop::handle_client_data(int client_fd) {
 
 bool EventLoop::start() {
     setup();
-    running_ = true;
+    running_.store(true);
 
     struct epoll_event events[kMaxEvents];
-    while (running_) {
+    while (running_.load()) {
         int n = epoll_wait(epoll_fd_, events, kMaxEvents, 1000);
         if (n < 0) {
             if (errno == EINTR) continue;
@@ -202,6 +204,7 @@ bool EventLoop::start() {
                 fd_callbacks_[fd](fd);
             }
             else if (ev & (EPOLLERR | EPOLLRDHUP | EPOLLHUP)) {
+                if (disconnect_callback_) disconnect_callback_(fd);
                 close(fd);
                 epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
                 if (monitor_client_fds_.count(fd)) {
@@ -226,11 +229,15 @@ bool EventLoop::start() {
 }
 
 void EventLoop::stop() {
-    running_ = false;
+    running_.store(false);
 }
 
 void EventLoop::set_data_callback(DataCallback cb) {
     data_callback_ = std::move(cb);
+}
+
+void EventLoop::set_disconnect_callback(DisconnectCallback cb) {
+    disconnect_callback_ = std::move(cb);
 }
 
 void EventLoop::add_external_fd(int fd, FdCallback cb) {

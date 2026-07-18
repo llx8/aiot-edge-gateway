@@ -20,6 +20,7 @@ UdsClient::~UdsClient() {
 
 ssize_t UdsClient::write(const void* buf, size_t len) {
     if (fd_ < 0) return -1;
+    std::lock_guard<std::mutex> lk(write_mutex_);
     return ::write(fd_, buf, len);
 }
 
@@ -35,7 +36,7 @@ int UdsClient::connect_with_backoff(int max_retries) {
 
         struct sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, path_.c_str(), sizeof(addr.sun_path));
+        strncpy(addr.sun_path, path_.c_str(), sizeof(addr.sun_path) - 1);
 
         if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
             GetLogger("UdsClient")->info("Connected to {} (retry={})", path_, retry);

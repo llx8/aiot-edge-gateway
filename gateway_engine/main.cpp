@@ -5,14 +5,15 @@
 #include "pipeline/Pipeline.h"
 #include <csignal>
 #include <cstring>
+#include <atomic>
 #include <unistd.h>
 #include <fstream>
 #include <sys/stat.h>
 #include "AnalysisScheduler.h"
 #include "HeartbeatReporter.h"
 
-static volatile sig_atomic_t g_running = 1;
-void signal_handler(int) { g_running = 0; }
+static std::atomic<sig_atomic_t> g_running{1};
+void signal_handler(int) { g_running.store(0); }
 
 int main() {
     auto logger = GetLogger("gateway_engine");
@@ -20,6 +21,7 @@ int main() {
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGPIPE, SIG_IGN);  // UDS/JPEG write 失败不能杀进程
 
     mkdir("/tmp/gateway_watchdog", 0755);
     // ready 信号延迟到 UDS 连接 + Pipeline 创建完成后才写（见下方），
@@ -52,13 +54,14 @@ int main() {
     gateway_engine::PipelineConfig pipe_cfg;
     pipe_cfg.video_path = "video/video.mp4";
     pipe_cfg.model_path = "models/yolov5s.rknn";
-    pipe_cfg.conf_threshold = 0.25f;
+    pipe_cfg.conf_threshold = 0.1f;
 
     gateway_engine::Pipeline pipeline(pipe_cfg);
     pipeline.setFatalCallback([&](const std::string& reason) {
         logger->error("FATAL: {}", reason);
-        InternalMessage fatal_msg;
+        InternalMessage fatal_msg{};
         fatal_msg.source_type = 3;
+        fatal_msg.node_id = 0;
         fatal_msg.tlv_type = TLV_FATAL;
         fatal_msg.payload.assign(reason.begin(), reason.end());
         auto encoded = encode_internal_msg(fatal_msg);
@@ -71,8 +74,9 @@ int main() {
 
         // 发送检测结果
         for (const auto& d : dets) {
-            InternalMessage msg;
+            InternalMessage msg{};
             msg.source_type = 3;
+            msg.node_id = 0;
             msg.tlv_type = 0x04;  // AI 视觉告警
             msg.payload.resize(sizeof(d));
             memcpy(msg.payload.data(), &d, sizeof(d));
@@ -84,8 +88,9 @@ int main() {
         // 发送 JPEG 快照（tlv_type=0x07），payload 格式：
         // [4B: num_detections] + [num_detections * 24B: Detection] + [JPEG data]
         if (!jpeg_data.empty()) {
-            InternalMessage jpeg_msg;
+            InternalMessage jpeg_msg{};
             jpeg_msg.source_type = 3;
+            jpeg_msg.node_id = 0;
             jpeg_msg.tlv_type = 0x07;
             int32_t num = static_cast<int32_t>(dets.size());
             jpeg_msg.payload.resize(4 + num * sizeof(gateway_engine::Detection) + jpeg_data.size());
@@ -114,7 +119,7 @@ int main() {
     // 主循环心跳
     HeartbeatReporter heartbeat(pipeline, uds_client);
     static constexpr float kNpuThrottleTempC = 85.0f;
-    while (g_running) {
+    while (g_running.load()) {
         heartbeat.send_heartbeat();
 
         // NPU 过热保护：> 85°C 自动降帧率

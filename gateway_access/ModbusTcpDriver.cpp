@@ -24,7 +24,7 @@ ModbusTcpDriver::ModbusTcpDriver(const std::string& ip, uint16_t port, uint8_t s
     , reg_start_(reg_start)
     , reg_count_(reg_count)
 {
-    running_ = false;
+    running_.store(false);
 }
 
 // 析构函数
@@ -48,15 +48,17 @@ void ModbusTcpDriver::start() {
     event_fd_ = eventfd(0, EFD_NONBLOCK);
     if (event_fd_ < 0) {
         GetLogger("ModbusTcpDriver")->error("Failed to create eventfd: {}", strerror(errno));
+        close(socket_fd_);
+        socket_fd_ = -1;
         return;
     }
-    running_ = true;
+    running_.store(true);
     poll_thread_ = std::thread(&ModbusTcpDriver::poll_loop, this);
 }
 
 // 停止轮询线程
 void ModbusTcpDriver::stop() {
-    running_ = false;
+    running_.store(false);
     if (poll_thread_.joinable()) {
         poll_thread_.join();
         }
@@ -85,19 +87,29 @@ void ModbusTcpDriver::set_poll_interval(uint16_t interval_ms) {
 
 // 主循环，轮询TCP数据并处理
 void ModbusTcpDriver::poll_loop() {
-    while (running_) {
+    while (running_.load()) {
         // 1 编码请求
         ModbusRequest req{slave_addr_, 0x03, reg_start_, reg_count_};
         auto frame = encode_tcp_request(trans_id_, req);
         trans_id_++;
         // 2 写TCP
-        write(socket_fd_, frame.data(), frame.size());
+        ssize_t wr = write(socket_fd_, frame.data(), frame.size());
+        if (wr != static_cast<ssize_t>(frame.size())) {
+            GetLogger("ModbusTcpDriver")->error("write incomplete: {}/{} bytes, errno={}",
+                wr, frame.size(), wr < 0 ? strerror(errno) : "short write");
+            reconnect();
+            continue;
+        }
         // 3 等待TCP响应（带超时），追加到接收缓冲区
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(socket_fd_, &rfds);
         struct timeval tv{0, 500000};  // 500ms
-        if (select(socket_fd_ + 1, &rfds, nullptr, nullptr, &tv) > 0) {
+        int sel_ret;
+        do {
+            sel_ret = select(socket_fd_ + 1, &rfds, nullptr, nullptr, &tv);
+        } while (sel_ret < 0 && errno == EINTR);  // W7: 信号打断不应误判为对端坏掉
+        if (sel_ret > 0) {
             uint8_t buf[256];
             ssize_t n = read(socket_fd_, buf, sizeof(buf));
             if (n > 0) {
@@ -169,13 +181,24 @@ bool ModbusTcpDriver::connect_to_server() {
     
     // 2. 设置非阻塞模式
     int flags = fcntl(socket_fd_, F_GETFL, 0);
+    if (flags < 0) {
+        GetLogger("ModbusTcpDriver")->error("fcntl F_GETFL failed: {}", strerror(errno));
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
     fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK);
     
     // 3. 连接远端 PLC
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port_);
-    inet_pton(AF_INET, ip_.c_str(), &addr.sin_addr);
+    if (inet_pton(AF_INET, ip_.c_str(), &addr.sin_addr) <= 0) {
+        GetLogger("ModbusTcpDriver")->error("inet_pton failed for {}", ip_);
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
     
     int ret = connect(socket_fd_, (struct sockaddr*)&addr, sizeof(addr));
     if (ret < 0 && errno != EINPROGRESS) {
@@ -188,7 +211,11 @@ bool ModbusTcpDriver::connect_to_server() {
     FD_ZERO(&wfds);
     FD_SET(socket_fd_, &wfds);
     struct timeval tv{3, 0};  // 3 秒超时
-    if (select(socket_fd_ + 1, nullptr, &wfds, nullptr, &tv) <= 0) {
+    int sel_ret;
+    do {
+        sel_ret = select(socket_fd_ + 1, nullptr, &wfds, nullptr, &tv);
+    } while (sel_ret < 0 && errno == EINTR);
+    if (sel_ret <= 0) {
         close(socket_fd_);
         socket_fd_ = -1;
         return false;
@@ -214,7 +241,7 @@ void ModbusTcpDriver::reconnect() {
     }
     GetLogger("ModbusTcpDriver")->warn("Reconnecting to {}:{}", ip_, port_);
     int backoff_ms = 100;
-    while (running_ && !connect_to_server()) {
+    while (running_.load() && !connect_to_server()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
         if (backoff_ms < 2000) backoff_ms *= 2;  // 最大 2s
     }

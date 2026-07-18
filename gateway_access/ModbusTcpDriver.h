@@ -29,7 +29,7 @@ private:
     std::atomic<uint16_t> poll_interval_ms_{0};
     uint16_t reg_start_ = 0;
     uint16_t reg_count_ = 0;
-    bool running_ = false;
+    std::atomic<bool> running_{false};
     std::thread poll_thread_ = {};
     std::vector<uint8_t> recv_buf_;     // TCP 流式接收缓冲区（MBAP 分帧）
     static constexpr size_t kMaxRecvBuf = 65536;  // 防止异常数据导致内存膨胀

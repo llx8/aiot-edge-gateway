@@ -27,7 +27,7 @@ private:
     uint8_t slave_addr_; // 从站地址
     std::atomic<uint16_t> poll_interval_ms_{0}; // 轮询间隔，原子变量支持 RPC 热修改
     uint16_t reg_start_, reg_count_; // 注册器起始地址和数量
-    bool running_; // 是否运行中
+    std::atomic<bool> running_{false}; // 是否运行中
     std::thread poll_thread_; // 轮询线程
 
     // 超时剔除与复活（设计:102：连续3次超时挂起，30s尝试复活一次）

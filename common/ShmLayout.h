@@ -34,6 +34,7 @@ static_assert(sizeof(ShmBlock) <= 4096, "ShmBlock 超出页大小");
 struct ShmRegion{
     ShmBlock buffers[2]; // 双缓冲区
     std::atomic<uint32_t> read_index; // 0或1， 标记当前可读的缓冲区索引
+    std::atomic<uint32_t> seq[2];    // seqlock：偶数=稳定，奇数=写入中。读端需校验前后奇偶一致才可信
 };
 
 #endif

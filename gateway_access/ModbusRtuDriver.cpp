@@ -19,7 +19,7 @@ ModbusRtuDriver::ModbusRtuDriver(const std::string& serial_port, uint8_t slave_a
     , reg_start_(reg_start)
     , reg_count_(reg_count)
 {
-    running_ = false;
+    running_.store(false);
 }
 
 // 析构函数
@@ -37,7 +37,11 @@ bool ModbusRtuDriver::open_serial() {
         return false;
     }
     struct termios options{};
-    tcgetattr(fd, &options);
+    if (tcgetattr(fd, &options) < 0) {
+        GetLogger("ModbusRtuDriver")->error("tcgetattr failed: {}", strerror(errno));
+        close(fd);
+        return false;
+    }
 
     cfsetispeed(&options, B9600);
     cfsetospeed(&options, B9600);
@@ -48,7 +52,11 @@ bool ModbusRtuDriver::open_serial() {
 
     options.c_cc[VMIN] = 0; // 非阻塞读取，立即返回
     options.c_cc[VTIME] = 5; // 超时时间，单位为秒
-    tcsetattr(fd, TCSANOW, &options);
+    if (tcsetattr(fd, TCSANOW, &options) < 0) {
+        GetLogger("ModbusRtuDriver")->error("tcsetattr failed: {}", strerror(errno));
+        close(fd);
+        return false;
+    }
     serial_fd_ = fd;
     return true;
 }
@@ -68,15 +76,17 @@ void ModbusRtuDriver::start() {
     event_fd_ = eventfd(0, EFD_NONBLOCK);
     if (event_fd_ < 0) {
         GetLogger("ModbusRtuDriver")->error("Failed to create eventfd: {}", strerror(errno));
+        close(serial_fd_);
+        serial_fd_ = -1;
         return;
     }
-    running_ = true;
+    running_.store(true);
     poll_thread_ = std::thread(&ModbusRtuDriver::poll_loop, this);
 }
 
 // 停止轮询线程
 void ModbusRtuDriver::stop() {
-    running_ = false;
+    running_.store(false);
     if (poll_thread_.joinable()) {
         poll_thread_.join();
     }
@@ -105,7 +115,7 @@ void ModbusRtuDriver::set_poll_interval(uint16_t interval_ms) {
 
 // 主循环，轮询串口数据并处理
 void ModbusRtuDriver::poll_loop() {
-    while (running_) {
+    while (running_.load()) {
         // —— 超时剔除：已挂起则跳过正常轮询，等待复活间隔 ——
         if (suspended_) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -128,11 +138,18 @@ void ModbusRtuDriver::poll_loop() {
         // 1 编码请求
         ModbusRequest req{slave_addr_, 0x03, reg_start_, reg_count_};
         auto frame = encode_request(req);
-        // 2 写串口
-        write(serial_fd_, frame.data(), frame.size());
+        // 2 写串口：先丢弃上次残留字节（上一轮解码失败/未读完时），避免污染新帧
+        tcflush(serial_fd_, TCIOFLUSH);
+        ssize_t written = write(serial_fd_, frame.data(), frame.size());
+        if (written < 0) {
+            GetLogger("ModbusRtuDriver")->error("serial write failed: {}", strerror(errno));
+        }
         // 3 等待串口数据
         uint8_t buf[256];
         ssize_t n = read(serial_fd_, buf, sizeof(buf));
+        if (n < 0) {
+            GetLogger("ModbusRtuDriver")->error("serial read failed: {}", strerror(errno));
+        }
         // 4 解码
         ModbusResponse resp;
         if (n > 0 && decode_response(buf, n, resp)) {

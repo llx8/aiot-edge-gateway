@@ -1,48 +1,40 @@
 {
   "rules": [
     {
-      "name": "运动球体检测",
-      "ai_class_id": 32,
-      "sensor_condition": "true",
-      "severity": 2
-    },
-    {
-      "name": "安全帽缺失",
+      "name": "人员检测",
       "ai_class_id": 0,
       "sensor_condition": "true",
+      "severity": 1
+    },
+    {
+      "name": "人员+高温告警",
+      "ai_class_id": 0,
+      "sensor_condition": "temp > 50.0",
       "severity": 3
     },
     {
-      "name": "区域入侵非工作时间",
-      "ai_class_id": 1,
-      "sensor_condition": "hour < 8 || hour > 18",
-      "severity": 4
-    },
-    {
-      "name": "区域入侵电机运行中",
-      "ai_class_id": 1,
-      "sensor_condition": "motor_running == true",
+      "name": "电视/显示器检测",
+      "ai_class_id": 62,
+      "sensor_condition": "true",
       "severity": 2
     },
     {
-      "name": "烟火检测",
+      "name": "冰箱/冷柜检测",
+      "ai_class_id": 72,
+      "sensor_condition": "true",
+      "severity": 2
+    },
+    {
+      "name": "汽车检测",
       "ai_class_id": 2,
       "sensor_condition": "true",
-      "severity": 4
+      "severity": 2
     },
     {
-      "name": "设备异常高温有人员",
+      "name": "摩托车检测",
       "ai_class_id": 3,
-      "sensor_condition": "temp > 80.0",
-      "severity": 3,
-      "requires_co_class": 0
-    },
-    {
-      "name": "设备异常高温无人员",
-      "ai_class_id": 3,
-      "sensor_condition": "temp > 80.0",
-      "severity": 2,
-      "excludes_co_class": 0
+      "sensor_condition": "true",
+      "severity": 2
     }
   ]
 }

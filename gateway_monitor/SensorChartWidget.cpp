@@ -50,7 +50,7 @@ void SensorChartWidget::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing);
 
     int w = width(), h = height();
-    if (w < 50 || h < 50) return;
+    if (w < 30 || h < 30) return;
 
     int ml = 44, mr = 16, mt = 18, mb = 28;
     int pw = w - ml - mr, ph = h - mt - mb;

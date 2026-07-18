@@ -7,9 +7,11 @@ void RpcHandler::register_method(const std::string& method, MethodHandler handle
 static std::string extract_json_str(const std::string& json, const std::string& key) {
     auto pos = json.find("\"" + key + "\"");
     if (pos == std::string::npos) return "";
-    auto start = json.find('"', pos + key.size() + 2) + 1;
+    auto val_start = json.find('"', pos + key.size() + 2);
+    if (val_start == std::string::npos) return "";
+    auto start = val_start + 1;
     auto end = json.find('"', start);
-    if (start == std::string::npos || end == std::string::npos) return "";
+    if (end == std::string::npos) return "";
     return json.substr(start, end - start);
 }
 
@@ -18,8 +20,11 @@ std::string RpcHandler::dispatch(const std::string& payload) {
     auto pos = payload.find("\"method\"");
     if (pos == std::string::npos) return "NACK: missing method";
 
-    auto start = payload.find('"', pos + 8) + 1;  // 跳过 "method":
+    auto val_start = payload.find('"', pos + 8);  // 跳过 "method":
+    if (val_start == std::string::npos) return "NACK: malformed method field";
+    auto start = val_start + 1;
     auto end = payload.find('"', start);
+    if (end == std::string::npos) return "NACK: malformed method field";
     std::string method_name = payload.substr(start, end - start);
 
     // 防重放：提取 id 字段并校验

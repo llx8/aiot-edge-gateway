@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <cstdlib>
+#include <csignal>
 
 int main(int argc, char* argv[]) {
     if (!qEnvironmentVariableIsSet("DISPLAY") && !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
@@ -12,6 +13,8 @@ int main(int argc, char* argv[]) {
 
     auto logger = GetLogger("gateway_monitor");
     logger->info("Starting gateway_monitor...");
+
+    signal(SIGPIPE, SIG_IGN);  // UDS write 失败不能杀进程
 
     QApplication app(argc, argv);
 

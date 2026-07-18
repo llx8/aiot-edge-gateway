@@ -34,8 +34,17 @@ void DbWriter::open_db(const std::string& db_path) {
         db_ = nullptr;
         return;
     }
-    sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
-    sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
+    int pragma_rc = sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+    if (pragma_rc != SQLITE_OK) {
+        GetLogger("DbWriter")->warn("PRAGMA journal_mode=WAL failed: {}", sqlite3_errmsg(db_));
+    }
+    pragma_rc = sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
+    if (pragma_rc != SQLITE_OK) {
+        GetLogger("DbWriter")->warn("PRAGMA synchronous=NORMAL failed: {}", sqlite3_errmsg(db_));
+    }
+    // 与 OfflineStore 共用同一 db 文件，并发的两 sqlite3 句柄加 busy_timeout
+    // 避免一方持有写锁时另一方直接拿到 SQLITE_BUSY 而丢数据
+    sqlite3_busy_timeout(db_, 3000);
 }
 
 void DbWriter::create_tables() {
@@ -57,8 +66,14 @@ void DbWriter::create_tables() {
             detail TEXT NOT NULL
         );
     )";
-    sqlite3_exec(db_, sensor_sql, nullptr, nullptr, nullptr);
-    sqlite3_exec(db_, alarm_sql, nullptr, nullptr, nullptr);
+    int sensor_rc = sqlite3_exec(db_, sensor_sql, nullptr, nullptr, nullptr);
+    if (sensor_rc != SQLITE_OK) {
+        GetLogger("DbWriter")->error("CREATE TABLE sensor_data failed: {}", sqlite3_errmsg(db_));
+    }
+    int alarm_rc = sqlite3_exec(db_, alarm_sql, nullptr, nullptr, nullptr);
+    if (alarm_rc != SQLITE_OK) {
+        GetLogger("DbWriter")->error("CREATE TABLE alarm_log failed: {}", sqlite3_errmsg(db_));
+    }
 }
 
 bool DbWriter::push(const DbRecord& record) {
@@ -137,7 +152,11 @@ void DbWriter::loop() {
 void DbWriter::flush_batch(const std::vector<DbRecord>& batch) {
     if (!db_ || batch.empty()) return;
 
-    sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+    int begin_rc = sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+    if (begin_rc != SQLITE_OK) {
+        GetLogger("DbWriter")->error("BEGIN TRANSACTION failed: {}", sqlite3_errmsg(db_));
+        return;
+    }
 
     sqlite3_stmt* sensor_stmt = nullptr;
     sqlite3_stmt* alarm_stmt = nullptr;
@@ -150,12 +169,20 @@ void DbWriter::flush_batch(const std::vector<DbRecord>& batch) {
         sqlite3_stmt* stmt = nullptr;
         if (record.type == DbOpType::SENSOR) {
             if (!sensor_stmt) {
-                sqlite3_prepare_v2(db_, sensor_sql, -1, &sensor_stmt, nullptr);
+                int sensor_prep_rc = sqlite3_prepare_v2(db_, sensor_sql, -1, &sensor_stmt, nullptr);
+                if (sensor_prep_rc != SQLITE_OK) {
+                    GetLogger("DbWriter")->error("sensor INSERT prepare failed: {}", sqlite3_errmsg(db_));
+                    continue;
+                }
             }
             stmt = sensor_stmt;
         } else {
             if (!alarm_stmt) {
-                sqlite3_prepare_v2(db_, alarm_sql, -1, &alarm_stmt, nullptr);
+                int alarm_prep_rc = sqlite3_prepare_v2(db_, alarm_sql, -1, &alarm_stmt, nullptr);
+                if (alarm_prep_rc != SQLITE_OK) {
+                    GetLogger("DbWriter")->error("alarm INSERT prepare failed: {}", sqlite3_errmsg(db_));
+                    continue;
+                }
             }
             stmt = alarm_stmt;
             has_alarm = true;

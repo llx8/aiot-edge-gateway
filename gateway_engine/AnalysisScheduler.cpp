@@ -23,15 +23,30 @@ void AnalysisScheduler::run() {
         // 1. 从 UDS fd 阻塞读取一条 InternalMessage
         uint8_t buf[4096];                    // 够装一条指令
         ssize_t n = read(uds_fd_, buf, sizeof(buf));
-        if (n <= 0) continue;                 // 断开或错误，下次重试
+        // n==0 表示对端 clean shutdown；errno 表连接 reset。
+        // 原实现 `if (n <= 0) continue;` 在对端关闭时会让 read 一直返回 0 → 100% CPU busy-spin。
+        // 这里改为退出循环，让进程 main 后续感知到调度线程死亡并退出 → watchdog 重新拉起。
+        if (n == 0) {
+            if (running_) {
+                GetLogger("AnalysisScheduler")->warn("UDS peer (core) closed, scheduler thread exiting");
+            }
+            break;
+        }
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EPIPE || errno == ENOTCONN || errno == ECONNRESET) {
+                if (running_) {
+                    GetLogger("AnalysisScheduler")->warn("UDS connection reset: {}", strerror(errno));
+                }
+                break;
+            }
+            continue;  // 其他 errno：短暂退避后重试（例如 EAGAIN——但 fd 是阻塞的，极少出现）
+        }
 
         // 2. 解码成 InternalMessage 格式
         auto result = decode_internal_msg(buf, n);
 
-        if (!result.ok) {
-            // 解码失败，忽略
-            continue;
-        }
+        if (!result.ok) continue;
 
         // 3. 判断是什么指令
         if (result.msg.tlv_type == CMD_START_ANALYSIS) {

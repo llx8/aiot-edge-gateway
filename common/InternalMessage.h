@@ -13,6 +13,8 @@ constexpr uint8_t CMD_MODEL_NACK      = 0x14;
 constexpr uint8_t TLV_JPEG_SNAPSHOT       = 0x07;  // JPEG 快照
 constexpr uint8_t TLV_ALARM_QUERY         = 0x20;  // monitor → core: 查询告警历史
 constexpr uint8_t TLV_ALARM_QUERY_RESPONSE = 0x21; // core → monitor: 告警历史响应
+constexpr uint8_t TLV_HISTORY_QUERY       = 0x22;  // monitor → core: 查询历史数据(温湿度+告警)
+constexpr uint8_t TLV_HISTORY_RESPONSE    = 0x23;  // core → monitor: 历史数据响应
 constexpr uint8_t TLV_FATAL               = 0xFE;  // FATAL 错误上报（0xFF 保留给设备心跳）
 
 // 内部消息

@@ -68,12 +68,22 @@ bool InferenceStage::init_rknn(const std::string& model_path) {
     for (uint32_t i = 0; i < io_num_.n_input; i++) {
         input_attrs_[i] = {};
         input_attrs_[i].index = i;
-        rknn_query(ctx_, RKNN_QUERY_INPUT_ATTR, &input_attrs_[i], sizeof(input_attrs_[i]));
+        ret = rknn_query(ctx_, RKNN_QUERY_INPUT_ATTR, &input_attrs_[i], sizeof(input_attrs_[i]));
+        if (ret < 0) {
+            GetLogger("InferenceStage")->error("rknn_query INPUT_ATTR[{}] failed, ret={}", i, ret);
+            destroy_rknn();
+            return false;
+        }
     }
     for (uint32_t i = 0; i < io_num_.n_output; i++) {
         output_attrs_[i] = {};
         output_attrs_[i].index = i;
-        rknn_query(ctx_, RKNN_QUERY_OUTPUT_ATTR, &output_attrs_[i], sizeof(output_attrs_[i]));
+        ret = rknn_query(ctx_, RKNN_QUERY_OUTPUT_ATTR, &output_attrs_[i], sizeof(output_attrs_[i]));
+        if (ret < 0) {
+            GetLogger("InferenceStage")->error("rknn_query OUTPUT_ATTR[{}] failed, ret={}", i, ret);
+            destroy_rknn();
+            return false;
+        }
     }
 
     // 输入一般是 NCHW，取 input_size

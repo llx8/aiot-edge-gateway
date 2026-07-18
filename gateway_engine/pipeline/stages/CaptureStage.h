@@ -25,6 +25,7 @@ private:
     PipelineQueue<std::shared_ptr<Frame>, 8>* output_queue_;
     GstElement* pipeline_ = nullptr;
     GstAppSink* appsink_ = nullptr;
+    guint bus_watch_id_ = 0;
     std::atomic<bool> throttle_{false};
     std::atomic<bool> eos_seen_{false};
 

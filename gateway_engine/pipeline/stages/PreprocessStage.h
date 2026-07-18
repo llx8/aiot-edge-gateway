@@ -13,6 +13,7 @@ public:
         PipelineQueue<std::shared_ptr<Frame>, 8>* input_queue,    
         PipelineQueue<std::shared_ptr<Frame>, 8>* output_queue,   
         int input_size);
+    ~PreprocessStage() override { stop(); }
 protected:
     void run() override;
 private:

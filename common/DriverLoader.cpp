@@ -30,10 +30,9 @@ std::unique_ptr<ISensorDriver> DriverLoader::create() {
     return std::unique_ptr<ISensorDriver>(factory_());
 }
 
-// 析构时自动 dlclose
+// 不 dlclose：驱动对象生命周期跨过 DriverLoader，提前卸载会导致
+// driver->start() 等后续调用因库被卸载而 segfault。
+// 库随进程退出自然释放，或调用者显式 close_driver()。
 DriverLoader::~DriverLoader() {
-    if (handle_) {
-        dlclose(handle_);
-        handle_ = nullptr;
-    }
+    (void)handle_;
 }
